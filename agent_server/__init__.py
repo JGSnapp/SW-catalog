@@ -1,0 +1,1 @@
+"""Grant Scout backend package."""

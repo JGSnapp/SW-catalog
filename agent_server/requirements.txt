@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+openai
+openai-agents
+httpx
+trafilatura
+playwright
+apscheduler
+python-dotenv
+pytest

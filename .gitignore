@@ -1,0 +1,7 @@
+.env
+hf-cache/
+results/
+data/
+frontend/node_modules/
+frontend/build/
+**/__pycache__/
