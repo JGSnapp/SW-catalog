@@ -1,102 +1,97 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
-type SupplierStatus = 'new' | 'reviewed' | 'suitable' | 'not_suitable' | 'applied';
+// ---------- types ----------
 
-type SiteConfig = {
+type ProjectStatus = 'planning' | 'in_progress' | 'review' | 'completed' | 'archived';
+type SupplierStatus = 'new' | 'verified' | 'preferred' | 'rejected' | 'contacted';
+
+type ProjectItem = {
+  id: string;
+  name: string;
+  specification: string;
+  quantity: number;
+  unit: string;
+  target_price: string;
+  notes: string;
+  image_url: string;
+  monitoring_enabled: boolean;
+  ai_notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectRecord = {
+  id: string;
+  name: string;
+  description: string;
+  status: ProjectStatus;
+  target_volume: string;
+  budget: string;
+  currency: string;
+  category: string;
+  cover_image_url: string;
+  items: ProjectItem[];
+  created_at: string;
+  updated_at: string;
+};
+
+type SupplierRecord = {
+  id: string;
+  project_id: string;
+  item_id: string;
+  name: string;
+  offer_title: string;
+  price: number | null;
+  price_text: string;
+  currency: string;
+  lead_time: string;
+  country: string;
+  category: string;
+  description: string;
+  terms: string;
+  restrictions: string;
+  url: string;
+  source_url: string;
+  contact: string;
+  image_url: string;
+  status: SupplierStatus;
+  is_existing: boolean;
+  monitoring_enabled: boolean;
+  discovered_at: string;
+  updated_at: string;
+  last_checked_at: string | null;
+  ai_notes: string;
+};
+
+type SourceSite = {
   id: string;
   label: string;
   url: string;
   enabled: boolean;
-  created_at: string;
-  updated_at: string;
-  last_run_at: string | null;
-  next_run_at: string | null;
+  category: string;
+  notes: string;
 };
 
 type AppConfig = {
   company_profile: string;
   global_prompt: string;
-  target_institutions: string;
-  search_directions: string;
-  min_amount: string;
-  max_amount: string;
-  funding_types: string;
-  regions: string;
-  deadline_window: string;
-  eligibility_requirements: string;
-  excluded_restrictions: string;
-  keywords: string;
-  interval_hours: number;
-  iterations_per_site: number;
-  source_discovery_enabled: boolean;
-  source_discovery_interval_hours: number;
-  source_discovery_iterations: number;
-  source_discovery_last_run_at: string | null;
-  source_discovery_next_run_at: string | null;
-  sites: SiteConfig[];
-};
-
-type SupplierOffer = {
-  id: string;
-  title: string;
-  institution: string;
-  amount: string;
-  funding_type: string;
-  category: string;
-  conditions: string;
-  restrictions: string;
-  deadline: string;
-  application_url: string;
-  status: SupplierStatus;
-  site: string;
-  site_id: string;
-  description: string;
-  fit_reason: string;
-  how_to_apply: string;
-  source: string;
-  site_url: string;
-  discovered_at: string;
-  updated_at: string;
-  last_run_id: string;
-  telegram_notified_at: string | null;
-};
-
-type ProductComponent = {
-  id: string;
-  name: string;
-  specification: string;
-  quantity: number;
-  target_price: string;
-  notes: string;
-};
-
-type ProductRecord = {
-  id: string;
-  name: string;
-  description: string;
-  target_volume: string;
-  components: ProductComponent[];
-  created_at: string;
-  updated_at: string;
-};
-
-type SourceCandidate = {
-  id: string;
-  label: string;
-  url: string;
-  reason: string;
-  evidence: string;
-  status: 'new' | 'added' | 'dismissed';
-  discovered_at: string;
-  updated_at: string;
-  last_run_id: string;
-  telegram_notified_at: string | null;
+  default_currency: string;
+  monitored_categories: string;
+  preferred_regions: string;
+  excluded_regions: string;
+  max_lead_time: string;
+  discovery_iterations: number;
+  monitor_iterations: number;
+  monitor_interval_hours: number;
+  sites: SourceSite[];
 };
 
 type RunRecord = {
   id: string;
-  site_id: string;
-  site_url: string;
+  kind: 'item_discovery' | 'item_monitor' | 'upload_parse' | 'image_search';
+  project_id: string | null;
+  item_id: string | null;
+  label: string;
   started_at: string;
   finished_at: string | null;
   status: 'queued' | 'running' | 'completed' | 'failed';
@@ -104,246 +99,189 @@ type RunRecord = {
   error: string | null;
 };
 
-type RunEventRecord = {
+type UploadRecord = {
   id: string;
-  run_id: string;
-  site_id: string;
-  site_url: string;
-  event_type: string;
-  message: string;
-  created_at: string;
-  metadata: Record<string, string>;
+  name: string;
+  kind: 'text' | 'table' | 'file';
+  size: number;
+  received_at: string;
+  parsed_at: string | null;
+  status: 'received' | 'parsing' | 'parsed' | 'failed';
+  summary: string;
+  error: string | null;
+  created_project_ids: string[];
 };
 
-type SiteTextResponse = {
-  content: string;
-  updated_at: string | null;
+type SupplierChange = {
+  id: string;
+  supplier_id: string;
+  project_id: string;
+  item_id: string;
+  supplier_name: string;
+  item_name: string;
+  change_type: 'price_up' | 'price_down' | 'stock' | 'lead_time' | 'terms' | 'added' | 'removed' | 'info';
+  old_value: string;
+  new_value: string;
+  summary: string;
+  detected_at: string;
 };
 
 type AppState = {
   config: AppConfig;
-  grants: SupplierOffer[];
-  products: ProductRecord[];
+  projects: ProjectRecord[];
+  suppliers: SupplierRecord[];
   runs: RunRecord[];
-  source_candidates: SourceCandidate[];
+  uploads: UploadRecord[];
+  changes: SupplierChange[];
+  stats: Record<string, number | string>;
 };
 
-type DashboardTab = 'products' | 'suppliers' | 'monitoring' | 'runs';
+type View = 'dashboard' | 'projects' | 'project' | 'suppliers' | 'reports' | 'settings';
+
+type UserPublic = {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+};
+
+type AuthResponse = {
+  user: UserPublic;
+  token: string;
+};
+
+// ---------- constants ----------
 
 const API_BASE = (process.env.REACT_APP_API_BASE || '/api').replace(/\/$/, '');
+const AUTH_TOKEN_KEY = 'sw_catalog_token';
+
+const STATUS_LABELS: Record<ProjectStatus, string> = {
+  planning: 'В планах',
+  in_progress: 'В работе',
+  review: 'На проверке',
+  completed: 'Готово',
+  archived: 'Архив',
+};
+
+const SUPPLIER_STATUS_LABELS: Record<SupplierStatus, string> = {
+  new: 'Новый',
+  verified: 'Проверен',
+  preferred: 'Предпочтительный',
+  rejected: 'Отклонён',
+  contacted: 'Запросили',
+};
+
+const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
+  { id: 'dashboard', label: 'Главная', icon: '◧' },
+  { id: 'projects', label: 'Проекты', icon: '▦' },
+  { id: 'suppliers', label: 'Поставщики', icon: '◎' },
+  { id: 'reports', label: 'Отчёты', icon: '◈' },
+  { id: 'settings', label: 'Настройки', icon: '◐' },
+];
+
+const APP_CURRENCY = 'RUB';
+const APP_CURRENCY_SYMBOL = '₽';
+
+// ---------- helpers ----------
+
+const formatMoney = (value: number, _currency = APP_CURRENCY) => {
+  const formatted = value.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+  return `${formatted} ${APP_CURRENCY_SYMBOL}`;
+};
+
+const formatDate = (value: string | null | undefined) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+};
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text || `Request failed: ${response.status}`;
+    try {
+      const payload = JSON.parse(text);
+      message = payload.detail || message;
+    } catch {
+      // Keep the raw response text when the backend does not return JSON.
+    }
+    throw new Error(message);
+  }
+  if (response.status === 204) return null as T;
+  return response.json() as Promise<T>;
+}
 
 const emptyConfig: AppConfig = {
   company_profile: '',
   global_prompt: '',
-  target_institutions: '',
-  search_directions: 'электроника, корпус, крепеж, упаковка, производство',
-  min_amount: '',
-  max_amount: '',
-  funding_types: 'производители, дистрибьюторы, маркетплейсы',
-  regions: '',
-  deadline_window: '',
-  eligibility_requirements: '',
-  excluded_restrictions: '',
-  keywords: '',
-  interval_hours: 24,
-  iterations_per_site: 12,
-  source_discovery_enabled: false,
-  source_discovery_interval_hours: 168,
-  source_discovery_iterations: 10,
-  source_discovery_last_run_at: null,
-  source_discovery_next_run_at: null,
+  default_currency: APP_CURRENCY,
+  monitored_categories: '',
+  preferred_regions: '',
+  excluded_regions: '',
+  max_lead_time: '',
+  discovery_iterations: 10,
+  monitor_iterations: 6,
+  monitor_interval_hours: 24,
   sites: [],
 };
 
-const statusLabels: Record<SupplierStatus, string> = {
-  new: 'Новый',
-  reviewed: 'Проверен',
-  suitable: 'Подходит',
-  not_suitable: 'Не подходит',
-  applied: 'Запрошена цена',
-};
-
-const statusOptions = Object.entries(statusLabels) as Array<[SupplierStatus, string]>;
-
-const makeId = () => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-
-const newComponent = (name = ''): ProductComponent => ({
-  id: makeId(),
-  name,
-  specification: '',
-  quantity: 1,
-  target_price: '',
-  notes: '',
-});
-
-const emptyProductDraft = {
+const emptyProjectDraft = {
   name: '',
   description: '',
+  status: 'planning' as ProjectStatus,
   target_volume: '',
-  components: [newComponent()],
+  budget: '',
+  currency: APP_CURRENCY,
+  category: '',
+  items: [{ name: '', specification: '', quantity: 1, unit: 'шт', target_price: '', notes: '' }],
 };
 
-const formatDate = (value: string | null) => {
-  if (!value) return 'Не указано';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
-};
-
-const normalize = (value: string | null | undefined) => (value || '').toLowerCase();
-
-const parsePrice = (value: string) => {
-  const normalized = value.replace(/\s/g, '').replace(',', '.');
-  const matches = normalized.match(/\d+(?:\.\d+)?/g);
-  if (!matches?.length) return 0;
-  return Math.min(...matches.map(Number).filter((item) => item > 0));
-};
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    ...init,
-  });
-  if (!response.ok) throw new Error((await response.text()) || 'Request failed');
-  return response.json() as Promise<T>;
-}
+// ---------- App ----------
 
 export default function App() {
+  const [user, setUser] = useState<UserPublic | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [state, setState] = useState<AppState | null>(null);
-  const [configDraft, setConfigDraft] = useState<AppConfig>(emptyConfig);
-  const [productDraft, setProductDraft] = useState<Omit<ProductRecord, 'id' | 'created_at' | 'updated_at'>>(emptyProductDraft);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
-  const [selectedSiteDraft, setSelectedSiteDraft] = useState({ label: '', url: '', enabled: true });
-  const [newSite, setNewSite] = useState({ label: '', url: '' });
-  const [siteNotes, setSiteNotes] = useState<SiteTextResponse>({ content: '', updated_at: null });
-  const [siteStatus, setSiteStatus] = useState<SiteTextResponse>({ content: '', updated_at: null });
-  const [supplierQuery, setSupplierQuery] = useState('');
-  const [supplierStatusFilter, setSupplierStatusFilter] = useState<'all' | SupplierStatus>('all');
-  const [activeTab, setActiveTab] = useState<DashboardTab>('products');
-  const [liveRunId, setLiveRunId] = useState<string | null>(null);
-  const [liveEvents, setLiveEvents] = useState<RunEventRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [runningSiteId, setRunningSiteId] = useState<string | null>(null);
-  const [runningDiscovery, setRunningDiscovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const selectedProduct = useMemo(
-    () => state?.products.find((product) => product.id === selectedProductId) || state?.products[0] || null,
-    [selectedProductId, state?.products]
-  );
-  const selectedSupplier = useMemo(
-    () => state?.grants.find((supplier) => supplier.id === selectedSupplierId) || state?.grants[0] || null,
-    [selectedSupplierId, state?.grants]
-  );
-  const selectedSite = useMemo(
-    () => state?.config.sites.find((site) => site.id === selectedSiteId) || null,
-    [selectedSiteId, state?.config.sites]
-  );
-  const activeRun = useMemo(
-    () => state?.runs.find((run) => run.status === 'queued' || run.status === 'running') || null,
-    [state?.runs]
-  );
-  const monitoredRun = useMemo(
-    () => state?.runs.find((run) => run.id === liveRunId) || activeRun || null,
-    [activeRun, liveRunId, state?.runs]
-  );
-
-  const filteredSuppliers = useMemo(() => {
-    const query = normalize(supplierQuery);
-    return [...(state?.grants || [])]
-      .filter((supplier) => {
-        const haystack = [
-          supplier.title,
-          supplier.institution,
-          supplier.amount,
-          supplier.funding_type,
-          supplier.category,
-          supplier.conditions,
-          supplier.deadline,
-          supplier.description,
-          supplier.site,
-        ]
-          .map(normalize)
-          .join(' ');
-        const matchesQuery = !query || haystack.includes(query);
-        const matchesStatus = supplierStatusFilter === 'all' || supplier.status === supplierStatusFilter;
-        return matchesQuery && matchesStatus;
-      })
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [state?.grants, supplierQuery, supplierStatusFilter]);
-
-  const supplierMatches = useMemo(() => {
-    const product = selectedProduct;
-    const suppliers = state?.grants || [];
-    if (!product) return [];
-    return product.components.map((component) => {
-      const terms = normalize(`${component.name} ${component.specification}`).split(/\s+/).filter((term) => term.length > 2);
-      const matches = suppliers
-        .filter((supplier) => {
-          const haystack = normalize(`${supplier.title} ${supplier.category} ${supplier.description} ${supplier.fit_reason}`);
-          return terms.some((term) => haystack.includes(term));
-        })
-        .sort((a, b) => parsePrice(a.amount) - parsePrice(b.amount));
-      const best = matches.find((supplier) => parsePrice(supplier.amount) > 0) || matches[0] || null;
-      const price = best ? parsePrice(best.amount) : 0;
-      return {
-        component,
-        best,
-        matches,
-        subtotal: price * Number(component.quantity || 1),
-      };
-    });
-  }, [selectedProduct, state?.grants]);
-
-  const totalEstimate = supplierMatches.reduce((sum, item) => sum + item.subtotal, 0);
-  const pendingCandidates = (state?.source_candidates || []).filter((candidate) => candidate.status === 'new');
-  const latestLiveEvent = liveEvents[liveEvents.length - 1] || null;
+  const [view, setView] = useState<View>('dashboard');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const loadState = async () => {
     const payload = await request<AppState>('/state');
     setState(payload);
-    setConfigDraft({ ...emptyConfig, ...payload.config });
-    setSelectedProductId((current) => current || payload.products[0]?.id || null);
-    setSelectedSupplierId((current) => current || payload.grants[0]?.id || null);
-    setSelectedSiteId((current) => current || payload.config.sites[0]?.id || null);
-  };
-
-  const loadSiteText = async (siteId: string) => {
-    const [notes, status] = await Promise.all([
-      request<SiteTextResponse>(`/sites/${siteId}/notes`),
-      request<SiteTextResponse>(`/sites/${siteId}/status`),
-    ]);
-    setSiteNotes(notes);
-    setSiteStatus(status);
-  };
-
-  const loadRunEvents = async (runId: string) => {
-    setLiveEvents(await request<RunEventRecord[]>(`/runs/${runId}/events`));
-  };
-
-  const refreshAll = async (siteId?: string | null) => {
-    await loadState();
-    const targetSiteId = siteId || selectedSiteId;
-    if (targetSiteId) await loadSiteText(targetSiteId);
-    if (liveRunId) await loadRunEvents(liveRunId);
   };
 
   useEffect(() => {
     let active = true;
     (async () => {
+      const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+      if (!token) {
+        if (active) {
+          setAuthChecked(true);
+          setLoading(false);
+        }
+        return;
+      }
       try {
-        await loadState();
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : 'Failed to load state');
+        const me = await request<UserPublic>('/auth/me');
+        if (active) setUser(me);
+      } catch {
+        window.localStorage.removeItem(AUTH_TOKEN_KEY);
       } finally {
-        if (active) setLoading(false);
+        if (active) setAuthChecked(true);
       }
     })();
     return () => {
@@ -352,702 +290,1423 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSite) return;
-    setSelectedSiteDraft({ label: selectedSite.label, url: selectedSite.url, enabled: selectedSite.enabled });
-    loadSiteText(selectedSite.id).catch((err) => setError(err instanceof Error ? err.message : 'Failed to load site'));
-  }, [selectedSite]);
+    if (!authChecked) return;
+    if (!user) {
+      setState(null);
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        setLoading(true);
+        await loadState();
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : 'Ошибка загрузки данных');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [authChecked, user]);
 
+  // Poll while any run is in flight.
   useEffect(() => {
-    if (!activeRun) return;
-    const timer = window.setInterval(() => {
+    if (!state) return;
+    const hasActiveRun = state.runs.some((run) => run.status === 'queued' || run.status === 'running');
+    if (!hasActiveRun) return;
+    const interval = window.setInterval(() => {
       loadState().catch(() => undefined);
-      if (selectedSiteId) loadSiteText(selectedSiteId).catch(() => undefined);
-      if (liveRunId) loadRunEvents(liveRunId).catch(() => undefined);
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [activeRun, liveRunId, selectedSiteId]);
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [state]);
 
   useEffect(() => {
-    if (activeRun?.id) setLiveRunId(activeRun.id);
-    else if (!liveRunId && state?.runs[0]?.id) setLiveRunId(state.runs[0].id);
-  }, [activeRun?.id, liveRunId, state?.runs]);
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
+  const openProject = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setSelectedItemId(null);
+    setView('project');
+  };
+
+  const selectedProject = useMemo(
+    () => state?.projects.find((p) => p.id === selectedProjectId) || null,
+    [state?.projects, selectedProjectId]
+  );
+
+  const handleAuthenticated = (payload: AuthResponse) => {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, payload.token);
+    setUser(payload.user);
+    setError(null);
+    setNotice(null);
+  };
+
+  const logout = async () => {
+    try {
+      await request('/auth/logout', { method: 'POST' });
+    } catch {
+      // Local logout must work even if the token has already expired server-side.
+    }
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    setUser(null);
+    setState(null);
+    setView('dashboard');
+  };
+
+  if (!authChecked || loading) {
+    return (
+      <div className="app-shell">
+        <div className="centered">Загрузка SW-catalog...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthLanding onAuthenticated={handleAuthenticated} />;
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar view={view} onNavigate={(next) => { setView(next); }} />
+      <main className="app-main">
+        <TopBar user={user} onLogout={logout} />
+        {error ? <div className="banner error-banner">{error}</div> : null}
+        {notice ? <div className="banner success-banner">{notice}</div> : null}
+
+        {view === 'dashboard' && state ? (
+          <DashboardView
+            state={state}
+            onError={setError}
+            onNotice={setNotice}
+            onReload={loadState}
+            onOpenProject={openProject}
+          />
+        ) : null}
+
+        {view === 'projects' && state ? (
+          <ProjectsView
+            state={state}
+            onOpenProject={openProject}
+            onError={setError}
+            onNotice={setNotice}
+            onReload={loadState}
+          />
+        ) : null}
+
+        {view === 'project' && state ? (
+          selectedProject ? (
+            <ProjectDetailView
+              state={state}
+              project={selectedProject}
+              selectedItemId={selectedItemId}
+              onSelectItem={setSelectedItemId}
+              onError={setError}
+              onNotice={setNotice}
+              onReload={loadState}
+              onBack={() => setView('projects')}
+            />
+          ) : (
+            <div className="empty-state">
+              <h3>Проект не выбран</h3>
+              <p>Откройте проект из списка.</p>
+              <button className="primary-button" onClick={() => setView('projects')}>К проектам</button>
+            </div>
+          )
+        ) : null}
+
+        {view === 'suppliers' && state ? (
+          <SuppliersView state={state} onError={setError} onNotice={setNotice} onReload={loadState} />
+        ) : null}
+
+        {view === 'reports' && state ? <ReportsView state={state} /> : null}
+
+        {view === 'settings' && state ? (
+          <SettingsView state={state} onError={setError} onNotice={setNotice} onReload={loadState} />
+        ) : null}
+      </main>
+    </div>
+  );
+}
+
+// ---------- Landing / Auth ----------
+
+function AuthLanding({ onAuthenticated }: { onAuthenticated: (payload: AuthResponse) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await request<AuthResponse>(mode === 'login' ? '/auth/login' : '/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      });
+      onAuthenticated(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось войти');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="landing-page">
+      <section className="landing-hero">
+        <div className="landing-copy">
+          <img className="landing-logo" src="/logo.png" alt="SW-catalog" />
+          <p className="section-kicker">Procurement OS</p>
+          <h1>SW-catalog</h1>
+          <p>
+            Рабочее пространство для закупок fashion-команд: проекты, BOM, поставщики, мониторинг цен и
+            агентский поиск альтернатив в одном кабинете.
+          </p>
+          <div className="landing-metrics">
+            <span>Проекты</span>
+            <span>Поставщики</span>
+            <span>Мониторинг</span>
+          </div>
+        </div>
+
+        <form className="auth-panel" onSubmit={submit}>
+          <div className="auth-tabs" role="tablist" aria-label="Авторизация">
+            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
+              Вход
+            </button>
+            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
+              Регистрация
+            </button>
+          </div>
+          <h2>{mode === 'login' ? 'Войти в аккаунт' : 'Создать аккаунт'}</h2>
+          {mode === 'register' ? (
+            <label className="field">
+              <span>Имя</span>
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Анна" />
+            </label>
+          ) : null}
+          <label className="field">
+            <span>Email</span>
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" required />
+          </label>
+          <label className="field">
+            <span>Пароль</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Минимум 6 символов"
+              required
+              minLength={6}
+            />
+          </label>
+          {error ? <div className="auth-error">{error}</div> : null}
+          <button className="primary-button" type="submit" disabled={busy || !email.trim() || password.length < 6}>
+            {busy ? 'Подключаю...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+// ---------- Sidebar / TopBar ----------
+
+function Sidebar({ view, onNavigate }: { view: View; onNavigate: (next: View) => void }) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <img className="brand-logo" src="/logo.png" alt="SW-catalog" />
+        <div>
+          <div className="brand-name">SW-catalog</div>
+          <div className="brand-sub">Procurement OS</div>
+        </div>
+      </div>
+      <nav className="sidebar-nav">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`sidebar-link ${view === item.id || (item.id === 'projects' && view === 'project') ? 'sidebar-link-active' : ''}`}
+            onClick={() => onNavigate(item.id)}
+          >
+            <span className="sidebar-icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="sidebar-foot">
+        <div className="sidebar-brand-card">
+          <div className="brand-mark mini">FA</div>
+          <div>
+            <div className="brand-name small">Fashion Atelier</div>
+            <div className="brand-sub">SS26 · capsule</div>
+          </div>
+        </div>
+        <div className="sidebar-status">Подписка активна</div>
+      </div>
+    </aside>
+  );
+}
+
+function TopBar({ user, onLogout }: { user: UserPublic; onLogout: () => void }) {
+  const initials = (user.name || user.email).slice(0, 2).toUpperCase();
+  return (
+    <header className="top-bar">
+      <div className="top-bar-left">
+        <input className="top-search" placeholder="Поиск проектов, позиций, поставщиков..." />
+      </div>
+      <div className="top-bar-right">
+        <button className="icon-button" title="Обновить">↻</button>
+        <div className="user-chip">
+          <div className="user-avatar">{initials}</div>
+          <div>
+            <div className="user-name">{user.name || user.email}</div>
+            <div className="user-role">{user.email}</div>
+          </div>
+        </div>
+        <button className="ghost-button small" type="button" onClick={onLogout}>Выйти</button>
+      </div>
+    </header>
+  );
+}
+
+// ---------- Dashboard view ----------
+
+function DashboardView(props: {
+  state: AppState;
+  onError: (value: string | null) => void;
+  onNotice: (value: string | null) => void;
+  onReload: () => Promise<void>;
+  onOpenProject: (id: string) => void;
+}) {
+  const { state, onError, onNotice, onReload, onOpenProject } = props;
+  const stats = state.stats;
+  const spent = Number(stats.spent_estimate || 0);
+  const savings = Number(stats.savings_estimate || 0);
+  const savingsPct = Number(stats.savings_pct || 0);
+  const activeProjects = Number(stats.projects_active || 0);
+  const suppliersMonitored = Number(stats.suppliers_monitored || 0);
+  const suppliersTotal = Number(stats.suppliers_total || 0);
+
+  return (
+    <div className="page">
+      <UploadCard onError={onError} onNotice={onNotice} onReload={onReload} />
+
+      <section className="stats-grid">
+        <StatCard
+          label="Оценка закупок"
+          value={formatMoney(spent)}
+          hint={savings ? `${formatMoney(savings)} (${savingsPct}%) экономии vs текущих условий` : 'Загрузите данные, чтобы посчитать экономию'}
+          accent="warm"
+        />
+        <StatCard
+          label="Поставщиков"
+          value={`${suppliersTotal}`}
+          hint={`${suppliersMonitored} под мониторингом`}
+          accent="cool"
+        />
+        <StatCard
+          label="Активных проектов"
+          value={`${activeProjects}`}
+          hint={`${stats.projects_total || 0} всего`}
+          accent="violet"
+        />
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Каталог</p>
+            <h2>Проекты и изделия</h2>
+          </div>
+          <CreateProjectButton onCreated={onReload} onError={onError} onNotice={onNotice} />
+        </div>
+        <ProjectsTable projects={state.projects} suppliers={state.suppliers} onOpen={onOpenProject} />
+      </section>
+
+      {state.changes.length ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Мониторинг</p>
+              <h2>Изменения по отслеживаемым поставщикам</h2>
+            </div>
+          </div>
+          <ChangesTable changes={state.changes.slice(0, 8)} />
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function StatCard({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: 'warm' | 'cool' | 'violet' }) {
+  return (
+    <div className={`stat-card stat-card-${accent || 'warm'}`}>
+      <div className="stat-card-label">{label}</div>
+      <div className="stat-card-value">{value}</div>
+      {hint ? <div className="stat-card-hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+// ---------- Upload card ----------
+
+function UploadCard(props: { onError: (v: string | null) => void; onNotice: (v: string | null) => void; onReload: () => Promise<void> }) {
+  const [text, setText] = useState('');
+  const [name, setName] = useState('Импорт закупочной выгрузки');
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const uploadKind = /\.(csv|tsv|xlsx?|xml|json)$/i.test(name) ? 'table' : 'text';
+
+  const submit = async () => {
+    if (!text.trim()) {
+      props.onError('Вставьте текст или таблицу для парсинга.');
+      return;
+    }
+    setBusy(true);
+    props.onError(null);
+    try {
+      await request('/uploads', {
+        method: 'POST',
+        body: JSON.stringify({ name: name || 'Импорт закупочной выгрузки', kind: uploadKind, content: text }),
+      });
+      setText('');
+      setName('Импорт закупочной выгрузки');
+      props.onNotice('Файл принят. ИИ-агент сейчас разнесёт его в проекты и позиции.');
+      await props.onReload();
+    } catch (err) {
+      props.onError(err instanceof Error ? err.message : 'Ошибка загрузки');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const consumeFile = async (file: File) => {
+    const content = await file.text();
+    setName(file.name);
+    setText(content);
+  };
+
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) await consumeFile(file);
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragOver(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) await consumeFile(file);
+  };
+
+  return (
+    <section className="upload-card">
+      <div className="upload-card-head">
+        <div>
+          <p className="section-kicker">Загрузка данных</p>
+          <h2>Загрузите данные по закупкам</h2>
+          <p className="upload-hint">
+            Вставьте таблицу BOM, прайс, текст с описанием или сделайте выгрузку из вашей системы — ИИ-агент
+            автоматически разнесёт это по проектам, позициям и поставщикам.
+          </p>
+        </div>
+      </div>
+
+      <div
+        className={`upload-dropzone ${dragOver ? 'upload-dropzone-active' : ''}`}
+        onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+      >
+        <div className="upload-format-row">
+          <span className="upload-format upload-format-bom">BOM</span>
+          <span className="upload-format upload-format-xls">XLS</span>
+          <span className="upload-format upload-format-csv">CSV</span>
+          <span className="upload-format upload-format-pdf">PDF</span>
+          <span className="upload-format upload-format-img">PNG</span>
+          <span className="upload-format upload-format-json">JSON</span>
+        </div>
+        <div className="upload-dropzone-text">
+          <strong>Перетащите файл сюда или выберите документ</strong>
+          <span>Поддерживаются TXT, CSV, TSV, JSON, MD. Большие файлы парсятся фоновым ИИ-агентом.</span>
+        </div>
+        <label className="file-input">
+          <input type="file" accept=".csv,.tsv,.txt,.md,.json,.xml" onChange={handleFile} />
+          <span>Выбрать файл</span>
+        </label>
+      </div>
+
+      <div className="upload-card-body">
+        <textarea
+          className="upload-textarea"
+          rows={5}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={`Жакет oversize SS26\n- основная ткань: шерсть 350 г/м², 320 м, цель 1 800 ₽/м, поставщик TextilePro Italy 2 200 ₽/м\n- подкладка: вискоза 120 г/м², 280 м\n- пуговицы: рог, 12 шт, поставщик Fornituris 40 ₽/шт`}
+        />
+      </div>
+
+      <div className="upload-card-actions">
+        <button className="primary-button" disabled={busy || !text.trim()} onClick={submit}>
+          {busy ? 'Парсю...' : 'Запустить ИИ-парсер'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Projects table ----------
+
+function ProjectsTable({ projects, suppliers, onOpen }: { projects: ProjectRecord[]; suppliers: SupplierRecord[]; onOpen: (id: string) => void }) {
+  if (!projects.length) {
+    return (
+      <div className="empty-state">
+        <h3>Проектов пока нет</h3>
+        <p>Загрузите файл выше или создайте проект вручную.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Проект</th>
+            <th>Статус</th>
+            <th>Компоненты</th>
+            <th>Поставщики</th>
+            <th>Бюджет</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((project) => {
+            const projectSuppliers = suppliers.filter((s) => s.project_id === project.id);
+            return (
+              <tr key={project.id} onClick={() => onOpen(project.id)}>
+                <td>
+                  <div className="project-row">
+                    <div className="project-thumb">
+                      {project.cover_image_url ? (
+                        <img src={project.cover_image_url} alt="" />
+                      ) : (
+                        <span>{(project.name[0] || '?').toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div>
+                      <strong>{project.name}</strong>
+                      <p>{project.category || project.description.slice(0, 60) || '—'}</p>
+                    </div>
+                  </div>
+                </td>
+                <td><StatusPill status={project.status} /></td>
+                <td>{project.items.length}</td>
+                <td>{projectSuppliers.length}</td>
+                <td>{project.budget || '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: ProjectStatus }) {
+  return <span className={`status-pill status-${status}`}>{STATUS_LABELS[status]}</span>;
+}
+
+// ---------- Create project ----------
+
+function CreateProjectButton(props: { onCreated: () => Promise<void>; onError: (v: string | null) => void; onNotice: (v: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(emptyProjectDraft);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft.name.trim()) return;
+    setBusy(true);
+    try {
+      await request('/projects', { method: 'POST', body: JSON.stringify(draft) });
+      props.onNotice('Проект создан.');
+      setDraft(emptyProjectDraft);
+      setOpen(false);
+      await props.onCreated();
+    } catch (err) {
+      props.onError(err instanceof Error ? err.message : 'Не удалось создать проект');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button className="primary-button" type="button" onClick={() => setOpen(true)}>
+        + Добавить проект
+      </button>
+    );
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={() => setOpen(false)}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <h3>Новый проект</h3>
+        <form className="stack-form" onSubmit={submit}>
+          <label className="field">
+            <span>Название</span>
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Жакет oversize SS26" />
+          </label>
+          <label className="field">
+            <span>Описание</span>
+            <textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Какая коллекция, тираж, дедлайн" />
+          </label>
+          <div className="field-row">
+            <label className="field">
+              <span>Статус</span>
+              <select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as ProjectStatus })}>
+                {(Object.entries(STATUS_LABELS) as Array<[ProjectStatus, string]>).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Бюджет</span>
+              <input value={draft.budget} onChange={(e) => setDraft({ ...draft, budget: e.target.value })} placeholder="800 000 ₽" />
+            </label>
+          </div>
+          <div className="field-row">
+            <label className="field">
+              <span>Тираж</span>
+              <input value={draft.target_volume} onChange={(e) => setDraft({ ...draft, target_volume: e.target.value })} placeholder="240 шт" />
+            </label>
+            <label className="field">
+              <span>Категория</span>
+              <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="Outerwear" />
+            </label>
+          </div>
+          <div className="modal-items">
+            <strong>Состав (компоненты)</strong>
+            {draft.items.map((item, index) => (
+              <div key={index} className="component-row">
+                <input
+                  value={item.name}
+                  onChange={(e) => {
+                    const items = [...draft.items];
+                    items[index] = { ...item, name: e.target.value };
+                    setDraft({ ...draft, items });
+                  }}
+                  placeholder="Название позиции"
+                />
+                <input
+                  value={item.specification}
+                  onChange={(e) => {
+                    const items = [...draft.items];
+                    items[index] = { ...item, specification: e.target.value };
+                    setDraft({ ...draft, items });
+                  }}
+                  placeholder="Спецификация"
+                />
+                <input
+                  type="number"
+                  value={item.quantity}
+                  onChange={(e) => {
+                    const items = [...draft.items];
+                    items[index] = { ...item, quantity: Number(e.target.value) };
+                    setDraft({ ...draft, items });
+                  }}
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  items: [...draft.items, { name: '', specification: '', quantity: 1, unit: 'шт', target_price: '', notes: '' }],
+                })
+              }
+            >
+              + позиция
+            </button>
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Отмена</button>
+            <button type="submit" className="primary-button" disabled={busy || !draft.name.trim()}>
+              {busy ? 'Сохраняю...' : 'Создать проект'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Projects view ----------
+
+function ProjectsView(props: {
+  state: AppState;
+  onOpenProject: (id: string) => void;
+  onError: (v: string | null) => void;
+  onNotice: (v: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Каталог</p>
+            <h2>Все проекты</h2>
+          </div>
+          <CreateProjectButton onCreated={props.onReload} onError={props.onError} onNotice={props.onNotice} />
+        </div>
+        <ProjectsTable projects={props.state.projects} suppliers={props.state.suppliers} onOpen={props.onOpenProject} />
+      </section>
+    </div>
+  );
+}
+
+// ---------- Project detail ----------
+
+function ProjectDetailView(props: {
+  state: AppState;
+  project: ProjectRecord;
+  selectedItemId: string | null;
+  onSelectItem: (id: string | null) => void;
+  onError: (v: string | null) => void;
+  onNotice: (v: string | null) => void;
+  onReload: () => Promise<void>;
+  onBack: () => void;
+}) {
+  const { project, state, selectedItemId, onSelectItem, onError, onNotice, onReload, onBack } = props;
+  const selectedItem = useMemo(
+    () => project.items.find((item) => item.id === selectedItemId) || project.items[0] || null,
+    [project.items, selectedItemId]
+  );
 
   useEffect(() => {
-    if (liveRunId) loadRunEvents(liveRunId).catch(() => undefined);
-  }, [liveRunId]);
+    if (!selectedItemId && project.items[0]) onSelectItem(project.items[0].id);
+  }, [project.id, project.items, selectedItemId, onSelectItem]);
 
-  const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
+  const projectSuppliers = state.suppliers.filter((s) => s.project_id === project.id);
+  const itemSuppliers = selectedItem ? projectSuppliers.filter((s) => s.item_id === selectedItem.id) : [];
+
+  const itemSavingsForProject = useMemo(() => {
+    let best = 0;
+    let baseline = 0;
+    project.items.forEach((item) => {
+      const sup = projectSuppliers.filter((s) => s.item_id === item.id && s.price != null);
+      if (!sup.length) return;
+      const minPrice = Math.min(...sup.map((s) => s.price as number));
+      const maxPrice = Math.max(...sup.map((s) => s.price as number));
+      const qty = item.quantity || 0;
+      best += minPrice * qty;
+      baseline += maxPrice * qty;
+    });
+    return { best, baseline, saved: Math.max(0, baseline - best) };
+  }, [project.items, projectSuppliers]);
+
+  return (
+    <div className="page">
+      <div className="breadcrumb">
+        <button className="link-button" onClick={onBack}>← Проекты</button>
+        <span>/</span>
+        <span>{project.name}</span>
+      </div>
+
+      <section className="project-header">
+        <div>
+          <p className="section-kicker">{project.category || 'Проект'}</p>
+          <h1>{project.name}</h1>
+          <p className="project-desc">{project.description || 'Описание не заполнено.'}</p>
+        </div>
+        <StatusPill status={project.status} />
+      </section>
+
+      <div className="project-stats">
+        <Mini label="Компоненты" value={`${project.items.length}`} />
+        <Mini label="Поставщики" value={`${projectSuppliers.length}`} />
+        <Mini label="На мониторинге" value={`${projectSuppliers.filter((s) => s.monitoring_enabled).length}`} />
+        <Mini label="Оценка закупки" value={formatMoney(itemSavingsForProject.best, project.currency)} accent="warm" />
+        <Mini label="Сэкономлено" value={formatMoney(itemSavingsForProject.saved, project.currency)} accent="cool" />
+        <Mini label="Бюджет" value={project.budget || '—'} />
+      </div>
+
+      <section className="project-grid">
+        <ItemsColumn
+          project={project}
+          suppliers={projectSuppliers}
+          selectedItemId={selectedItem?.id || null}
+          onSelect={(id) => onSelectItem(id)}
+          onError={onError}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+        <ItemDetailColumn
+          project={project}
+          item={selectedItem}
+          itemSuppliers={itemSuppliers}
+          onError={onError}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+        <SuppliersColumn
+          project={project}
+          item={selectedItem}
+          suppliers={itemSuppliers}
+          onError={onError}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Мониторинг</p>
+            <h2>Изменения по отслеживаемым поставщикам</h2>
+          </div>
+        </div>
+        <ChangesTable
+          changes={state.changes.filter((change) => change.project_id === project.id).slice(0, 10)}
+        />
+      </section>
+    </div>
+  );
+}
+
+function Mini({ label, value, accent }: { label: string; value: string; accent?: 'warm' | 'cool' }) {
+  return (
+    <div className={`mini-stat mini-${accent || 'neutral'}`}>
+      <div className="mini-label">{label}</div>
+      <div className="mini-value">{value}</div>
+    </div>
+  );
+}
+
+function ItemsColumn(props: {
+  project: ProjectRecord;
+  suppliers: SupplierRecord[];
+  selectedItemId: string | null;
+  onSelect: (id: string) => void;
+  onError: (v: string | null) => void;
+  onNotice: (v: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
+  const { project, suppliers, selectedItemId, onSelect, onError, onNotice, onReload } = props;
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({ name: '', specification: '', quantity: 1, unit: 'шт', target_price: '' });
+
+  const addItem = async () => {
+    if (!draft.name.trim()) return;
+    try {
+      await request(`/projects/${project.id}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ ...draft, notes: '', image_url: '', monitoring_enabled: true }),
+      });
+      setDraft({ name: '', specification: '', quantity: 1, unit: 'шт', target_price: '' });
+      setAdding(false);
+      onNotice('Позиция добавлена.');
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Не удалось добавить позицию');
+    }
+  };
+
+  return (
+    <div className="column">
+      <div className="column-head">
+        <h3>Компоненты товара</h3>
+        <button className="secondary-button small" onClick={() => setAdding(!adding)}>{adding ? '×' : '+ позиция'}</button>
+      </div>
+      {adding ? (
+        <div className="inline-form">
+          <input placeholder="Название" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <input placeholder="Спецификация" value={draft.specification} onChange={(e) => setDraft({ ...draft, specification: e.target.value })} />
+          <div className="inline-row">
+            <input type="number" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: Number(e.target.value) })} />
+            <input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />
+            <input placeholder="Цель, ₽" value={draft.target_price} onChange={(e) => setDraft({ ...draft, target_price: e.target.value })} />
+          </div>
+          <button className="primary-button small" onClick={addItem}>Добавить</button>
+        </div>
+      ) : null}
+      <div className="item-list">
+        {project.items.map((item) => {
+          const itemSuppliers = suppliers.filter((s) => s.item_id === item.id);
+          const minPrice = itemSuppliers
+            .map((s) => s.price)
+            .filter((p): p is number => p != null)
+            .reduce((acc, value) => Math.min(acc, value), Infinity);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`item-row ${selectedItemId === item.id ? 'item-row-active' : ''}`}
+              onClick={() => onSelect(item.id)}
+            >
+              <div className="item-thumb">
+                {item.image_url ? <img src={item.image_url} alt="" /> : <span>{item.name[0] || '?'}</span>}
+              </div>
+              <div className="item-body">
+                <div className="item-name">{item.name}</div>
+                <div className="item-spec">{item.specification || 'Спецификация не указана'}</div>
+                <div className="item-meta">
+                  <span>{itemSuppliers.length} поставщ.</span>
+                  <span>{item.quantity} {item.unit}</span>
+                </div>
+              </div>
+              <div className="item-price">
+                {Number.isFinite(minPrice) ? formatMoney(minPrice as number, project.currency) : item.target_price || '—'}
+              </div>
+            </button>
+          );
+        })}
+        {!project.items.length ? <div className="empty-state small"><p>Нет позиций. Добавьте первую.</p></div> : null}
+      </div>
+    </div>
+  );
+}
+
+function ItemDetailColumn(props: {
+  project: ProjectRecord;
+  item: ProjectItem | null;
+  itemSuppliers: SupplierRecord[];
+  onError: (v: string | null) => void;
+  onNotice: (v: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
+  const { project, item, itemSuppliers, onError, onNotice, onReload } = props;
+  const [busy, setBusy] = useState(false);
+
+  if (!item) {
+    return (
+      <div className="column">
+        <div className="column-head"><h3>Деталь позиции</h3></div>
+        <div className="empty-state small"><p>Выберите позицию слева.</p></div>
+      </div>
+    );
+  }
+
+  const runDiscovery = async () => {
+    setBusy(true);
+    try {
+      await request(`/projects/${project.id}/items/${item.id}/discover`, { method: 'POST' });
+      onNotice('ИИ-агент ищет новых поставщиков для этой позиции.');
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Не удалось запустить агента');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm('Удалить позицию и связанных поставщиков?')) return;
+    try {
+      await request(`/projects/${project.id}/items/${item.id}`, { method: 'DELETE' });
+      onNotice('Позиция удалена.');
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Не удалось удалить');
+    }
+  };
+
+  const minPrice = itemSuppliers
+    .map((s) => s.price)
+    .filter((p): p is number => p != null)
+    .reduce((acc, value) => Math.min(acc, value), Infinity);
+  const maxPrice = itemSuppliers
+    .map((s) => s.price)
+    .filter((p): p is number => p != null)
+    .reduce((acc, value) => Math.max(acc, value), 0);
+
+  return (
+    <div className="column">
+      <div className="column-head">
+        <h3>{item.name}</h3>
+        <button className="ghost-button small" onClick={remove}>Удалить</button>
+      </div>
+      {item.image_url ? <img className="item-hero-image" src={item.image_url} alt={item.name} /> : null}
+      <dl className="detail-list">
+        <div><dt>Спецификация</dt><dd>{item.specification || '—'}</dd></div>
+        <div><dt>Количество</dt><dd>{item.quantity} {item.unit}</dd></div>
+        <div><dt>Целевая цена</dt><dd>{item.target_price || '—'}</dd></div>
+        <div><dt>Заметки</dt><dd>{item.notes || '—'}</dd></div>
+        <div><dt>Диапазон цен</dt><dd>{Number.isFinite(minPrice) ? `${formatMoney(minPrice as number, project.currency)} … ${formatMoney(maxPrice, project.currency)}` : '—'}</dd></div>
+      </dl>
+      <div className="item-detail-actions">
+        <button className="primary-button" onClick={runDiscovery} disabled={busy}>
+          {busy ? 'Запускаю...' : 'Найти поставщиков'}
+        </button>
+      </div>
+      {item.ai_notes ? (
+        <div className="ai-notes">
+          <strong>Заметки ИИ-агента</strong>
+          <pre>{item.ai_notes}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SuppliersColumn(props: {
+  project: ProjectRecord;
+  item: ProjectItem | null;
+  suppliers: SupplierRecord[];
+  onError: (v: string | null) => void;
+  onNotice: (v: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
+  const { project, item, suppliers, onError, onNotice, onReload } = props;
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({ name: '', price_text: '', lead_time: '', country: '', url: '' });
+
+  if (!item) {
+    return (
+      <div className="column">
+        <div className="column-head"><h3>Поставщики</h3></div>
+        <div className="empty-state small"><p>Выберите позицию слева.</p></div>
+      </div>
+    );
+  }
+
+  const toggleMonitor = async (supplier: SupplierRecord) => {
+    try {
+      await request(`/suppliers/${supplier.id}/monitor`, {
+        method: 'PUT',
+        body: JSON.stringify({ monitoring_enabled: !supplier.monitoring_enabled }),
+      });
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Ошибка');
+    }
+  };
+
+  const addSupplier = async () => {
+    if (!draft.name.trim()) return;
+    try {
+      await request(`/projects/${project.id}/items/${item.id}/suppliers`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...draft,
+          currency: APP_CURRENCY,
+          offer_title: '',
+          price: null,
+          description: '',
+          terms: '',
+          restrictions: '',
+          category: item.specification,
+          source_url: draft.url,
+          contact: '',
+          image_url: '',
+          status: 'verified',
+          is_existing: true,
+          monitoring_enabled: true,
+        }),
+      });
+      setDraft({ name: '', price_text: '', lead_time: '', country: '', url: '' });
+      setAdding(false);
+      onNotice('Поставщик добавлен.');
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Не удалось добавить');
+    }
+  };
+
+  const sorted = [...suppliers].sort((a, b) => {
+    const pa = a.price ?? Infinity;
+    const pb = b.price ?? Infinity;
+    return pa - pb;
+  });
+  const minPrice = sorted.find((s) => s.price != null)?.price ?? null;
+
+  return (
+    <div className="column">
+      <div className="column-head">
+        <h3>Поставщики для: {item.name}</h3>
+        <button className="secondary-button small" onClick={() => setAdding(!adding)}>{adding ? '×' : '+ поставщик'}</button>
+      </div>
+      {adding ? (
+        <div className="inline-form">
+          <input placeholder="Название поставщика" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <div className="inline-row">
+            <input placeholder="Цена, ₽" value={draft.price_text} onChange={(e) => setDraft({ ...draft, price_text: e.target.value })} />
+          </div>
+          <div className="inline-row">
+            <input placeholder="Срок поставки" value={draft.lead_time} onChange={(e) => setDraft({ ...draft, lead_time: e.target.value })} />
+            <input placeholder="Страна" value={draft.country} onChange={(e) => setDraft({ ...draft, country: e.target.value })} />
+          </div>
+          <input placeholder="Ссылка" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+          <button className="primary-button small" onClick={addSupplier}>Добавить</button>
+        </div>
+      ) : null}
+      <div className="supplier-list">
+        {sorted.map((supplier) => (
+          <article key={supplier.id} className={`supplier-card ${supplier.price != null && supplier.price === minPrice ? 'supplier-best' : ''}`}>
+            <div className="supplier-card-head">
+              <div>
+                <strong>{supplier.name}</strong>
+                <div className="supplier-meta">
+                  {supplier.country || '—'} · {supplier.lead_time || 'срок не указан'}
+                </div>
+              </div>
+              <label className="toggle" title="Отслеживать в открытых источниках">
+                <input
+                  type="checkbox"
+                  checked={supplier.monitoring_enabled}
+                  onChange={() => toggleMonitor(supplier)}
+                />
+                <span />
+              </label>
+            </div>
+            <div className="supplier-price-row">
+              <strong>{supplier.price != null ? formatMoney(supplier.price, supplier.currency) : supplier.price_text || '—'}</strong>
+              <span className={`status-pill status-${supplier.status}`}>{SUPPLIER_STATUS_LABELS[supplier.status]}</span>
+            </div>
+            {supplier.description ? <p className="supplier-desc">{supplier.description}</p> : null}
+            {supplier.ai_notes ? <p className="supplier-ai">{supplier.ai_notes}</p> : null}
+            <div className="supplier-actions">
+              {supplier.url ? (
+                <a href={supplier.url} target="_blank" rel="noreferrer">Открыть</a>
+              ) : null}
+              {supplier.monitoring_enabled ? <span className="dot dot-live">Мониторинг</span> : null}
+              {supplier.is_existing ? <span className="dot dot-existing">Текущий</span> : <span className="dot dot-discovered">ИИ</span>}
+            </div>
+          </article>
+        ))}
+        {!sorted.length ? (
+          <div className="empty-state small">
+            <p>Поставщиков нет. Запустите ИИ-агента или добавьте вручную.</p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Suppliers view ----------
+
+function SuppliersView(props: { state: AppState; onError: (v: string | null) => void; onNotice: (v: string | null) => void; onReload: () => Promise<void> }) {
+  const { state, onError, onNotice, onReload } = props;
+  const [filter, setFilter] = useState('');
+
+  const filtered = state.suppliers
+    .filter((s) => !filter.trim() || `${s.name} ${s.country} ${s.category} ${s.description}`.toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+
+  const toggle = async (supplier: SupplierRecord) => {
+    try {
+      await request(`/suppliers/${supplier.id}/monitor`, {
+        method: 'PUT',
+        body: JSON.stringify({ monitoring_enabled: !supplier.monitoring_enabled }),
+      });
+      onNotice(`Мониторинг ${!supplier.monitoring_enabled ? 'включен' : 'выключен'} для ${supplier.name}`);
+      await onReload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Ошибка');
+    }
+  };
+
+  const projectFor = (projectId: string) => state.projects.find((p) => p.id === projectId);
+  const itemFor = (projectId: string, itemId: string) =>
+    state.projects.find((p) => p.id === projectId)?.items.find((i) => i.id === itemId);
+
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Каталог</p>
+            <h2>Поставщики</h2>
+          </div>
+          <input className="top-search" placeholder="Фильтр..." value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 280 }} />
+        </div>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Поставщик</th>
+                <th>Проект / позиция</th>
+                <th>Цена</th>
+                <th>Срок</th>
+                <th>Страна</th>
+                <th>Мониторинг</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((supplier) => {
+                const project = projectFor(supplier.project_id);
+                const item = itemFor(supplier.project_id, supplier.item_id);
+                return (
+                  <tr key={supplier.id}>
+                    <td>
+                      <strong>{supplier.name}</strong>
+                      <div className="muted">{supplier.offer_title || supplier.category}</div>
+                    </td>
+                    <td>
+                      <div>{project?.name || '—'}</div>
+                      <div className="muted">{item?.name || '—'}</div>
+                    </td>
+                    <td>{supplier.price != null ? formatMoney(supplier.price, supplier.currency) : supplier.price_text || '—'}</td>
+                    <td>{supplier.lead_time || '—'}</td>
+                    <td>{supplier.country || '—'}</td>
+                    <td>
+                      <label className="toggle">
+                        <input type="checkbox" checked={supplier.monitoring_enabled} onChange={() => toggle(supplier)} />
+                        <span />
+                      </label>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filtered.length ? (
+                <tr><td colSpan={6}><div className="empty-state small"><p>Поставщиков пока нет.</p></div></td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- Reports ----------
+
+function ReportsView({ state }: { state: AppState }) {
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">История</p>
+            <h2>Запуски ИИ-агента</h2>
+          </div>
+        </div>
+        <div className="run-list">
+          {state.runs.map((run) => (
+            <div key={run.id} className="run-row">
+              <div>
+                <strong>{run.label}</strong>
+                <p>{run.summary || run.error || 'Без резюме.'}</p>
+              </div>
+              <div className="run-meta">
+                <span className={`status-pill status-${run.status}`}>{run.status}</span>
+                <span>{formatDate(run.started_at)}</span>
+              </div>
+            </div>
+          ))}
+          {!state.runs.length ? <div className="empty-state"><p>Запусков пока нет.</p></div> : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Загрузки</p>
+            <h2>Импорт данных</h2>
+          </div>
+        </div>
+        <div className="run-list">
+          {state.uploads.map((upload) => (
+            <div key={upload.id} className="run-row">
+              <div>
+                <strong>{upload.name}</strong>
+                <p>{upload.summary || upload.error || `Статус: ${upload.status}`}</p>
+              </div>
+              <div className="run-meta">
+                <span className={`status-pill status-${upload.status}`}>{upload.status}</span>
+                <span>{formatDate(upload.received_at)}</span>
+              </div>
+            </div>
+          ))}
+          {!state.uploads.length ? <div className="empty-state"><p>Загрузок пока нет.</p></div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- Settings ----------
+
+function SettingsView(props: { state: AppState; onError: (v: string | null) => void; onNotice: (v: string | null) => void; onReload: () => Promise<void> }) {
+  const { state, onError, onNotice, onReload } = props;
+  const [draft, setDraft] = useState<AppConfig>({ ...emptyConfig, ...state.config, default_currency: APP_CURRENCY });
+  const [saving, setSaving] = useState(false);
+  const [siteDraft, setSiteDraft] = useState({ label: '', url: '', category: '', notes: '', enabled: true });
+
+  useEffect(() => {
+    setDraft({ ...emptyConfig, ...state.config, default_currency: APP_CURRENCY });
+  }, [state.config]);
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
-    setError(null);
     try {
-      const product = await request<ProductRecord>('/products', { method: 'POST', body: JSON.stringify(productDraft) });
-      setProductDraft(emptyProductDraft);
-      setSelectedProductId(product.id);
-      setNotice('Карточка изделия сохранена.');
-      await refreshAll();
+      await request('/config', { method: 'PUT', body: JSON.stringify({ ...draft, default_currency: APP_CURRENCY }) });
+      onNotice('Настройки сохранены.');
+      await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save product');
+      onError(err instanceof Error ? err.message : 'Не удалось сохранить');
     } finally {
       setSaving(false);
     }
   };
 
-  const updateProduct = async (product: ProductRecord) => {
-    setSaving(true);
-    setError(null);
+  const addSite = async () => {
+    if (!siteDraft.label || !siteDraft.url) return;
     try {
-      await request<ProductRecord>(`/products/${product.id}`, { method: 'PUT', body: JSON.stringify(product) });
-      setNotice('Состав изделия обновлен.');
-      await refreshAll();
+      await request('/sites', { method: 'POST', body: JSON.stringify(siteDraft) });
+      setSiteDraft({ label: '', url: '', category: '', notes: '', enabled: true });
+      onNotice('Источник добавлен.');
+      await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update product');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const deleteProduct = async (productId: string) => {
-    setSaving(true);
-    setError(null);
-    try {
-      await request<{ ok: boolean }>(`/products/${productId}`, { method: 'DELETE' });
-      setSelectedProductId(null);
-      await refreshAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete product');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const generateComponents = () => {
-    const text = normalize(`${productDraft.name} ${productDraft.description}`);
-    const names = ['Корпус', 'Плата управления', 'Крепеж', 'Упаковка'];
-    if (text.includes('датчик') || text.includes('сенсор')) names.splice(1, 0, 'Сенсорный модуль', 'Кабель');
-    if (text.includes('робот') || text.includes('мотор')) names.splice(1, 0, 'Электродвигатель', 'Редуктор');
-    if (text.includes('пласт') || text.includes('лить')) names.splice(1, 0, 'Пластиковая заготовка');
-    setProductDraft((current) => ({ ...current, components: Array.from(new Set(names)).map((name) => newComponent(name)) }));
-  };
-
-  const saveConfig = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await request<AppConfig>('/config', { method: 'PUT', body: JSON.stringify(configDraft) });
-      setNotice('Настройки мониторинга сохранены.');
-      await refreshAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save config');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const addSite = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const site = await request<SiteConfig>('/sites', { method: 'POST', body: JSON.stringify({ ...newSite, enabled: true }) });
-      setNewSite({ label: '', url: '' });
-      setSelectedSiteId(site.id);
-      await refreshAll(site.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add site');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveSite = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedSite) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await request<SiteConfig>(`/sites/${selectedSite.id}`, { method: 'PUT', body: JSON.stringify(selectedSiteDraft) });
-      setNotice('Площадка обновлена.');
-      await refreshAll(selectedSite.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update site');
-    } finally {
-      setSaving(false);
+      onError(err instanceof Error ? err.message : 'Не удалось добавить');
     }
   };
 
   const deleteSite = async (siteId: string) => {
-    setSaving(true);
-    setError(null);
     try {
-      await request<{ ok: boolean }>(`/sites/${siteId}`, { method: 'DELETE' });
-      setSelectedSiteId(null);
-      await refreshAll();
+      await request(`/sites/${siteId}`, { method: 'DELETE' });
+      await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete site');
-    } finally {
-      setSaving(false);
+      onError(err instanceof Error ? err.message : 'Ошибка');
     }
   };
-
-  const runSite = async (siteId: string) => {
-    setRunningSiteId(siteId);
-    setError(null);
-    try {
-      const result = await request<{ run_id: string }>(`/sites/${siteId}/run`, { method: 'POST' });
-      setLiveRunId(result.run_id);
-      setNotice('Проверка площадки запущена.');
-      await refreshAll(siteId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start run');
-    } finally {
-      setRunningSiteId(null);
-    }
-  };
-
-  const runDiscovery = async () => {
-    setRunningDiscovery(true);
-    setError(null);
-    try {
-      const result = await request<{ run_id: string }>('/source-discovery/run', { method: 'POST' });
-      setLiveRunId(result.run_id);
-      setNotice('Поиск новых площадок запущен.');
-      await refreshAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start source discovery');
-    } finally {
-      setRunningDiscovery(false);
-    }
-  };
-
-  const addCandidate = async (candidateId: string) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const site = await request<SiteConfig>(`/source-candidates/${candidateId}/add`, { method: 'POST' });
-      setSelectedSiteId(site.id);
-      await refreshAll(site.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add candidate');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateSupplierStatus = async (supplierId: string, status: SupplierStatus) => {
-    try {
-      const updated = await request<SupplierOffer>(`/grants/${supplierId}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({ status }),
-      });
-      setState((current) =>
-        current ? { ...current, grants: current.grants.map((item) => (item.id === supplierId ? updated : item)) } : current
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update supplier');
-    }
-  };
-
-  if (loading) return <div className="shell centered">Загрузка приложения...</div>;
 
   return (
-    <div className="shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Supplier Scout</p>
-          <h1>Закупки изделия и мониторинг поставщиков</h1>
-          <p className="hero-copy">
-            Карточки изделий, состав, найденные поставщики, сравнение цен и регулярная проверка сайтов в одном рабочем
-            интерфейсе.
-          </p>
-        </div>
-        <div className="hero-stats">
-          <div className="stat-card">
-            <span className="stat-value">{state?.products.length || 0}</span>
-            <span className="stat-label">Изделий</span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-value">{state?.grants.length || 0}</span>
-            <span className="stat-label">Поставщиков</span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-value">{state?.config.sites.length || 0}</span>
-            <span className="stat-label">Площадок</span>
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Профиль бренда</p>
+            <h2>Настройки поиска</h2>
           </div>
         </div>
-      </header>
-
-      {error ? <div className="banner error-banner">{error}</div> : null}
-      {notice ? <div className="banner success-banner">{notice}</div> : null}
-
-      <nav className="tab-bar" aria-label="Разделы">
-        {[
-          ['products', 'Изделия'],
-          ['suppliers', 'Поставщики'],
-          ['monitoring', 'Мониторинг'],
-          ['runs', 'Запуски'],
-        ].map(([tab, label]) => (
-          <button
-            key={tab}
-            type="button"
-            className={`tab-button ${activeTab === tab ? 'tab-button-active' : ''}`}
-            onClick={() => setActiveTab(tab as DashboardTab)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      <section className="live-strip">
-        <div className="live-strip-head">
-          <strong>Live мониторинг</strong>
-          {monitoredRun ? <span className={`pill pill-${monitoredRun.status}`}>{monitoredRun.status}</span> : null}
-        </div>
-        <div className="live-strip-body">
-          <p>{latestLiveEvent?.message || monitoredRun?.summary || 'Нет активной проверки.'}</p>
-          {monitoredRun ? <p>{formatDate(latestLiveEvent?.created_at || monitoredRun.started_at)}</p> : null}
-        </div>
+        <form className="stack-form" onSubmit={save}>
+          <label className="field"><span>Профиль бренда / закупщика</span>
+            <textarea rows={4} value={draft.company_profile} onChange={(e) => setDraft({ ...draft, company_profile: e.target.value })} />
+          </label>
+          <label className="field"><span>Глобальный промпт для ИИ</span>
+            <textarea rows={3} value={draft.global_prompt} onChange={(e) => setDraft({ ...draft, global_prompt: e.target.value })} />
+          </label>
+          <div className="field-row">
+            <label className="field"><span>Категории мониторинга</span>
+              <input value={draft.monitored_categories} onChange={(e) => setDraft({ ...draft, monitored_categories: e.target.value })} />
+            </label>
+            <label className="field"><span>Валюта по умолчанию</span>
+              <input value={APP_CURRENCY} readOnly />
+            </label>
+          </div>
+          <div className="field-row">
+            <label className="field"><span>Предпочтительные регионы</span>
+              <input value={draft.preferred_regions} onChange={(e) => setDraft({ ...draft, preferred_regions: e.target.value })} />
+            </label>
+            <label className="field"><span>Исключённые регионы</span>
+              <input value={draft.excluded_regions} onChange={(e) => setDraft({ ...draft, excluded_regions: e.target.value })} />
+            </label>
+          </div>
+          <div className="field-row">
+            <label className="field"><span>Максимальный срок поставки</span>
+              <input value={draft.max_lead_time} onChange={(e) => setDraft({ ...draft, max_lead_time: e.target.value })} />
+            </label>
+            <label className="field"><span>Итераций discovery</span>
+              <input type="number" min={1} value={draft.discovery_iterations} onChange={(e) => setDraft({ ...draft, discovery_iterations: Number(e.target.value) })} />
+            </label>
+          </div>
+          <div className="field-row">
+            <label className="field"><span>Итераций мониторинга</span>
+              <input type="number" min={1} value={draft.monitor_iterations} onChange={(e) => setDraft({ ...draft, monitor_iterations: Number(e.target.value) })} />
+            </label>
+            <label className="field"><span>Период мониторинга, ч</span>
+              <input type="number" min={1} value={draft.monitor_interval_hours} onChange={(e) => setDraft({ ...draft, monitor_interval_hours: Number(e.target.value) })} />
+            </label>
+          </div>
+          <button className="primary-button" disabled={saving} type="submit">{saving ? 'Сохраняю...' : 'Сохранить'}</button>
+        </form>
       </section>
 
-      <main className="tab-layout">
-        {activeTab === 'products' ? (
-          <div className="dashboard">
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Product Card</p>
-                  <h2>Карточка изделия</h2>
-                </div>
-              </div>
-              <form className="stack-form" onSubmit={saveProduct}>
-                <label className="field">
-                  <span>Название изделия</span>
-                  <input
-                    value={productDraft.name}
-                    onChange={(event) => setProductDraft((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Например: контроллер доступа"
-                  />
-                </label>
-                <label className="field">
-                  <span>Описание и требования</span>
-                  <textarea
-                    rows={4}
-                    value={productDraft.description}
-                    onChange={(event) => setProductDraft((current) => ({ ...current, description: event.target.value }))}
-                    placeholder="Материалы, назначение, параметры, ограничения по поставке"
-                  />
-                </label>
-                <label className="field">
-                  <span>Плановый объем</span>
-                  <input
-                    value={productDraft.target_volume}
-                    onChange={(event) => setProductDraft((current) => ({ ...current, target_volume: event.target.value }))}
-                    placeholder="100 шт/месяц, пилотная партия 20 шт"
-                  />
-                </label>
-                <div className="component-list">
-                  {productDraft.components.map((component, index) => (
-                    <div className="component-row" key={component.id}>
-                      <input
-                        value={component.name}
-                        onChange={(event) =>
-                          setProductDraft((current) => ({
-                            ...current,
-                            components: current.components.map((item) =>
-                              item.id === component.id ? { ...item, name: event.target.value } : item
-                            ),
-                          }))
-                        }
-                        placeholder="Позиция"
-                      />
-                      <input
-                        value={component.specification}
-                        onChange={(event) =>
-                          setProductDraft((current) => ({
-                            ...current,
-                            components: current.components.map((item) =>
-                              item.id === component.id ? { ...item, specification: event.target.value } : item
-                            ),
-                          }))
-                        }
-                        placeholder="Спецификация"
-                      />
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={component.quantity}
-                        onChange={(event) =>
-                          setProductDraft((current) => ({
-                            ...current,
-                            components: current.components.map((item) =>
-                              item.id === component.id ? { ...item, quantity: Number(event.target.value) } : item
-                            ),
-                          }))
-                        }
-                        aria-label={`Количество ${index + 1}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="site-card-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => setProductDraft((current) => ({ ...current, components: [...current.components, newComponent()] }))}
-                  >
-                    Добавить позицию
-                  </button>
-                  <button className="secondary-button" type="button" onClick={generateComponents}>
-                    ИИ: предложить состав
-                  </button>
-                  <button className="primary-button" type="submit" disabled={saving || !productDraft.name}>
-                    Сохранить изделие
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Savings Mix</p>
-                  <h2>Комбинация поставщиков</h2>
-                </div>
-              </div>
-              {selectedProduct ? (
-                <div className="product-summary">
-                  <h3>{selectedProduct.name}</h3>
-                  <p>{selectedProduct.description || 'Описание не заполнено.'}</p>
-                  <div className="total-card">
-                    <span>Оценка по лучшим ценам</span>
-                    <strong>{totalEstimate ? `${totalEstimate.toLocaleString('ru-RU')} ₽` : 'Недостаточно цен'}</strong>
-                  </div>
-                  <div className="match-list">
-                    {supplierMatches.map(({ component, best, matches, subtotal }) => (
-                      <article className="match-card" key={component.id}>
-                        <div>
-                          <h4>{component.name}</h4>
-                          <p>{component.specification || 'Спецификация не указана'} · {component.quantity} шт.</p>
-                        </div>
-                        {best ? (
-                          <div>
-                            <strong>{best.institution || best.site || best.title}</strong>
-                            <p>{best.amount || 'Цена не указана'} · вариантов: {matches.length}</p>
-                            <p>{subtotal ? `Подытог: ${subtotal.toLocaleString('ru-RU')} ₽` : 'Нужна ручная проверка цены'}</p>
-                          </div>
-                        ) : (
-                          <p>Подходящих поставщиков пока нет. Запустите мониторинг площадок.</p>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                  <button className="ghost-button" type="button" onClick={() => deleteProduct(selectedProduct.id)} disabled={saving}>
-                    Удалить изделие
-                  </button>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <h3>Изделий пока нет</h3>
-                  <p>Создайте карточку изделия и распишите состав, чтобы система сопоставила позиции с поставщиками.</p>
-                </div>
-              )}
-            </section>
-
-            <section className="panel panel-wide">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Products</p>
-                  <h2>Сохраненные изделия</h2>
-                </div>
-              </div>
-              <div className="candidate-grid">
-                {(state?.products || []).map((product) => (
-                  <article
-                    key={product.id}
-                    className={`candidate-card ${selectedProduct?.id === product.id ? 'site-card-active' : ''}`}
-                    onClick={() => setSelectedProductId(product.id)}
-                  >
-                    <h3>{product.name}</h3>
-                    <p>{product.description || 'Нет описания.'}</p>
-                    <div className="site-card-meta">
-                      <span>{product.components.length} позиций</span>
-                      <span>{product.target_volume || 'Объем не указан'}</span>
-                    </div>
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        updateProduct({
-                          ...product,
-                          components: [...product.components, newComponent('Новая позиция')],
-                        });
-                      }}
-                    >
-                      Добавить позицию
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Источники</p>
+            <h2>Постоянные площадки</h2>
           </div>
-        ) : null}
-
-        {activeTab === 'suppliers' ? (
-          <section className="panel">
-            <div className="panel-heading">
+        </div>
+        <div className="stack-form compact-form">
+          <div className="field-row">
+            <label className="field"><span>Название</span><input value={siteDraft.label} onChange={(e) => setSiteDraft({ ...siteDraft, label: e.target.value })} /></label>
+            <label className="field"><span>URL</span><input value={siteDraft.url} onChange={(e) => setSiteDraft({ ...siteDraft, url: e.target.value })} /></label>
+          </div>
+          <div className="field-row">
+            <label className="field"><span>Категория</span><input value={siteDraft.category} onChange={(e) => setSiteDraft({ ...siteDraft, category: e.target.value })} /></label>
+            <label className="field"><span>Заметка</span><input value={siteDraft.notes} onChange={(e) => setSiteDraft({ ...siteDraft, notes: e.target.value })} /></label>
+          </div>
+          <button className="secondary-button" onClick={addSite}>Добавить источник</button>
+        </div>
+        <div className="site-list">
+          {state.config.sites.map((site) => (
+            <div key={site.id} className="site-row">
               <div>
-                <p className="section-kicker">Supplier Cards</p>
-                <h2>Карточки поставщиков</h2>
+                <strong>{site.label}</strong>
+                <div className="muted">{site.url}</div>
+                {site.category ? <div className="muted">{site.category}</div> : null}
               </div>
+              <button className="ghost-button small" onClick={() => deleteSite(site.id)}>Удалить</button>
             </div>
-            <div className="grant-toolbar">
-              <label className="field">
-                <span>Поиск</span>
-                <input value={supplierQuery} onChange={(event) => setSupplierQuery(event.target.value)} placeholder="Поставщик, компонент, цена" />
-              </label>
-              <label className="field">
-                <span>Статус</span>
-                <select value={supplierStatusFilter} onChange={(event) => setSupplierStatusFilter(event.target.value as 'all' | SupplierStatus)}>
-                  <option value="all">Все статусы</option>
-                  {statusOptions.map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {filteredSuppliers.length ? (
-              <div className="supplier-card-grid">
-                {filteredSuppliers.map((supplier) => (
-                  <article
-                    key={supplier.id}
-                    className={`supplier-card ${selectedSupplier?.id === supplier.id ? 'site-card-active' : ''}`}
-                    onClick={() => setSelectedSupplierId(supplier.id)}
-                  >
-                    <div className="candidate-card-head">
-                      <div>
-                        <h3>{supplier.institution || supplier.title}</h3>
-                        <p>{supplier.title}</p>
-                      </div>
-                      <span className={`pill pill-grant-${supplier.status}`}>{statusLabels[supplier.status]}</span>
-                    </div>
-                    <dl className="grant-facts">
-                      <div><dt>Цена</dt><dd>{supplier.amount || 'Unknown'}</dd></div>
-                      <div><dt>Компонент</dt><dd>{supplier.category || 'Unknown'}</dd></div>
-                      <div><dt>Тип</dt><dd>{supplier.funding_type || 'Unknown'}</dd></div>
-                      <div><dt>Срок</dt><dd>{supplier.deadline || 'Unknown'}</dd></div>
-                    </dl>
-                    <p>{supplier.description || supplier.fit_reason || 'Описание не заполнено.'}</p>
-                    <div className="site-card-actions">
-                      <select
-                        value={supplier.status}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => updateSupplierStatus(supplier.id, event.target.value as SupplierStatus)}
-                      >
-                        {statusOptions.map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                      <a href={supplier.application_url || supplier.source} target="_blank" rel="noreferrer">Открыть</a>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <h3>Поставщиков пока нет</h3>
-                <p>Добавьте площадки и запустите проверку. Найденные предложения появятся карточками.</p>
-              </div>
-            )}
-          </section>
-        ) : null}
+          ))}
+          {!state.config.sites.length ? <div className="empty-state small"><p>Источники не настроены.</p></div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
 
-        {activeTab === 'monitoring' ? (
-          <div className="dashboard">
-            <section className="panel panel-wide">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Search Setup</p>
-                  <h2>Настройки поиска поставщиков</h2>
-                </div>
-              </div>
-              <form className="stack-form" onSubmit={saveConfig}>
-                <label className="field">
-                  <span>Профиль изделия и закупки</span>
-                  <textarea rows={5} value={configDraft.company_profile} onChange={(event) => setConfigDraft((current) => ({ ...current, company_profile: event.target.value }))} />
-                </label>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Предпочтительные площадки</span>
-                    <input value={configDraft.target_institutions} onChange={(event) => setConfigDraft((current) => ({ ...current, target_institutions: event.target.value }))} />
-                  </label>
-                  <label className="field">
-                    <span>Компоненты и группы</span>
-                    <input value={configDraft.search_directions} onChange={(event) => setConfigDraft((current) => ({ ...current, search_directions: event.target.value }))} />
-                  </label>
-                </div>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Минимальная цена/партия</span>
-                    <input value={configDraft.min_amount} onChange={(event) => setConfigDraft((current) => ({ ...current, min_amount: event.target.value }))} />
-                  </label>
-                  <label className="field">
-                    <span>Максимальный бюджет</span>
-                    <input value={configDraft.max_amount} onChange={(event) => setConfigDraft((current) => ({ ...current, max_amount: event.target.value }))} />
-                  </label>
-                </div>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Типы поставщиков</span>
-                    <input value={configDraft.funding_types} onChange={(event) => setConfigDraft((current) => ({ ...current, funding_types: event.target.value }))} />
-                  </label>
-                  <label className="field">
-                    <span>Регион и доставка</span>
-                    <input value={configDraft.regions} onChange={(event) => setConfigDraft((current) => ({ ...current, regions: event.target.value }))} />
-                  </label>
-                </div>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Срок поставки</span>
-                    <input value={configDraft.deadline_window} onChange={(event) => setConfigDraft((current) => ({ ...current, deadline_window: event.target.value }))} />
-                  </label>
-                  <label className="field">
-                    <span>Ключевые слова и артикулы</span>
-                    <input value={configDraft.keywords} onChange={(event) => setConfigDraft((current) => ({ ...current, keywords: event.target.value }))} />
-                  </label>
-                </div>
-                <label className="field">
-                  <span>Обязательные условия</span>
-                  <textarea rows={3} value={configDraft.eligibility_requirements} onChange={(event) => setConfigDraft((current) => ({ ...current, eligibility_requirements: event.target.value }))} />
-                </label>
-                <label className="field">
-                  <span>Исключить</span>
-                  <textarea rows={3} value={configDraft.excluded_restrictions} onChange={(event) => setConfigDraft((current) => ({ ...current, excluded_restrictions: event.target.value }))} />
-                </label>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Периодичность проверки, часов</span>
-                    <input type="number" min={1} value={configDraft.interval_hours} onChange={(event) => setConfigDraft((current) => ({ ...current, interval_hours: Number(event.target.value) }))} />
-                  </label>
-                  <label className="field">
-                    <span>Итераций на площадку</span>
-                    <input type="number" min={1} value={configDraft.iterations_per_site} onChange={(event) => setConfigDraft((current) => ({ ...current, iterations_per_site: Number(event.target.value) }))} />
-                  </label>
-                </div>
-                <label className="checkbox-field">
-                  <input type="checkbox" checked={configDraft.source_discovery_enabled} onChange={(event) => setConfigDraft((current) => ({ ...current, source_discovery_enabled: event.target.checked }))} />
-                  <span>Искать новые площадки поставщиков по расписанию</span>
-                </label>
-                <button className="primary-button" type="submit" disabled={saving}>Сохранить настройки</button>
-              </form>
-            </section>
+// ---------- Changes table ----------
 
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Sites</p>
-                  <h2>Площадки</h2>
-                </div>
-                <button className="secondary-button" type="button" onClick={runDiscovery} disabled={runningDiscovery}>
-                  {runningDiscovery ? 'Запускается...' : 'Найти площадки'}
-                </button>
-              </div>
-              <form className="stack-form compact-form" onSubmit={addSite}>
-                <label className="field"><span>Название</span><input value={newSite.label} onChange={(event) => setNewSite((current) => ({ ...current, label: event.target.value }))} /></label>
-                <label className="field"><span>URL</span><input value={newSite.url} onChange={(event) => setNewSite((current) => ({ ...current, url: event.target.value }))} /></label>
-                <button className="secondary-button" type="submit" disabled={saving || !newSite.label || !newSite.url}>Добавить площадку</button>
-              </form>
-              <div className="site-list">
-                {(state?.config.sites || []).map((site) => {
-                  const siteRun = state?.runs.find((run) => run.site_id === site.id && (run.status === 'queued' || run.status === 'running'));
-                  return (
-                    <article key={site.id} className={`site-card ${selectedSiteId === site.id ? 'site-card-active' : ''}`} onClick={() => setSelectedSiteId(site.id)}>
-                      <div className="site-card-top">
-                        <div><h3>{site.label}</h3><p>{site.url}</p></div>
-                        <span className={`pill ${site.enabled ? 'pill-live' : 'pill-muted'}`}>{site.enabled ? 'Включена' : 'Пауза'}</span>
-                      </div>
-                      <div className="site-card-meta"><span>Последний: {formatDate(site.last_run_at)}</span><span>Следующий: {formatDate(site.next_run_at)}</span></div>
-                      <div className="site-card-actions">
-                        <button className="primary-button" type="button" disabled={Boolean(siteRun) || runningSiteId === site.id} onClick={(event) => { event.stopPropagation(); runSite(site.id); }}>
-                          {siteRun ? 'Выполняется...' : 'Проверить'}
-                        </button>
-                        <button className="ghost-button" type="button" onClick={(event) => { event.stopPropagation(); deleteSite(site.id); }}>Удалить</button>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-heading"><div><p className="section-kicker">Selected Site</p><h2>Статус площадки</h2></div></div>
-              {selectedSite ? (
-                <>
-                  <form className="stack-form" onSubmit={saveSite}>
-                    <label className="field"><span>Название</span><input value={selectedSiteDraft.label} onChange={(event) => setSelectedSiteDraft((current) => ({ ...current, label: event.target.value }))} /></label>
-                    <label className="field"><span>URL</span><input value={selectedSiteDraft.url} onChange={(event) => setSelectedSiteDraft((current) => ({ ...current, url: event.target.value }))} /></label>
-                    <label className="checkbox-field"><input type="checkbox" checked={selectedSiteDraft.enabled} onChange={(event) => setSelectedSiteDraft((current) => ({ ...current, enabled: event.target.checked }))} /><span>Проверять по расписанию</span></label>
-                    <button className="secondary-button" type="submit" disabled={saving}>Сохранить площадку</button>
-                  </form>
-                  <div className="detail-grid single-column">
-                    <div className="detail-card"><div className="detail-card-top"><h3>Заметки</h3><span>{formatDate(siteNotes.updated_at)}</span></div><pre>{siteNotes.content || 'Заметок пока нет.'}</pre></div>
-                    <div className="detail-card"><div className="detail-card-top"><h3>Отчет</h3><span>{formatDate(siteStatus.updated_at)}</span></div><pre>{siteStatus.content || 'Отчета пока нет.'}</pre></div>
-                  </div>
-                </>
-              ) : <div className="empty-state"><h3>Площадка не выбрана</h3><p>Выберите сайт, чтобы увидеть заметки и отчет.</p></div>}
-            </section>
-
-            {pendingCandidates.length ? (
-              <section className="panel panel-wide">
-                <div className="panel-heading"><div><p className="section-kicker">Suggestions</p><h2>Новые площадки</h2></div></div>
-                <div className="candidate-grid">
-                  {pendingCandidates.map((candidate) => (
-                    <article className="candidate-card" key={candidate.id}>
-                      <h3>{candidate.label}</h3>
-                      <a href={candidate.url} target="_blank" rel="noreferrer">{candidate.url}</a>
-                      <p>{candidate.reason || candidate.evidence || 'Нет пояснения.'}</p>
-                      <button className="primary-button" type="button" onClick={() => addCandidate(candidate.id)} disabled={saving}>Добавить</button>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-
-        {activeTab === 'runs' ? (
-          <section className="panel">
-            <div className="panel-heading"><div><p className="section-kicker">Run Log</p><h2>История запусков</h2></div></div>
-            <div className="run-live-header">
-              <span>События</span>
-              <select value={liveRunId || ''} onChange={(event) => setLiveRunId(event.target.value || null)} disabled={!state?.runs.length}>
-                {!state?.runs.length ? <option value="">Нет запусков</option> : null}
-                {state?.runs.map((run) => <option key={run.id} value={run.id}>{formatDate(run.started_at)} · {run.site_url}</option>)}
-              </select>
-            </div>
-            {liveEvents.length ? (
-              <div className="run-event-list">
-                {liveEvents.map((event) => (
-                  <div className="run-event-row" key={event.id}>
-                    <div><strong>{event.message}</strong><p>{event.metadata?.query || event.metadata?.url || event.site_url}</p></div>
-                    <span>{formatDate(event.created_at)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : <div className="empty-state"><h3>Событий пока нет</h3><p>Они появятся во время проверки площадок.</p></div>}
-            <div className="run-list">
-              {(state?.runs || []).map((run) => (
-                <div className="run-row" key={run.id}>
-                  <div><strong>{run.site_url}</strong><p>{run.summary || run.error || 'Нет резюме.'}</p></div>
-                  <div className="run-meta"><span className={`pill pill-${run.status}`}>{run.status}</span><span>{formatDate(run.started_at)}</span></div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-      </main>
+function ChangesTable({ changes }: { changes: SupplierChange[] }) {
+  if (!changes.length) {
+    return <div className="empty-state small"><p>Изменений ещё нет — включите мониторинг поставщиков, и ИИ-агент будет сюда писать.</p></div>;
+  }
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Поставщик</th>
+            <th>Позиция</th>
+            <th>Тип</th>
+            <th>Было</th>
+            <th>Стало</th>
+            <th>Когда</th>
+          </tr>
+        </thead>
+        <tbody>
+          {changes.map((change) => (
+            <tr key={change.id}>
+              <td>{change.supplier_name}</td>
+              <td>{change.item_name}</td>
+              <td><span className={`status-pill status-${change.change_type}`}>{change.change_type}</span></td>
+              <td>{change.old_value || '—'}</td>
+              <td>{change.new_value || '—'}</td>
+              <td>{formatDate(change.detected_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

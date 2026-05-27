@@ -8,3 +8,4 @@ playwright
 apscheduler
 python-dotenv
 pytest
+psycopg[binary]
