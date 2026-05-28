@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from urllib.parse import quote
 
@@ -12,6 +13,30 @@ def env_enabled(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 300) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
+_browser_semaphore: asyncio.Semaphore | None = None
+_browser_semaphore_limit: int | None = None
+
+
+def browser_semaphore() -> asyncio.Semaphore:
+    global _browser_semaphore, _browser_semaphore_limit
+    limit = env_int("PLAYWRIGHT_BROWSER_WORKERS", 1, min_value=1, max_value=4)
+    if _browser_semaphore is None or _browser_semaphore_limit != limit:
+        _browser_semaphore = asyncio.Semaphore(limit)
+        _browser_semaphore_limit = limit
+    return _browser_semaphore
 
 
 def build_reader_url(target_url: str) -> str:
@@ -37,7 +62,7 @@ def should_fallback(exc: Exception) -> bool:
     return exc.response.status_code >= 400
 
 
-async def read_with_jina(url: str, timeout: int = 60) -> dict[str, object]:
+async def read_with_jina(url: str, timeout: int = 20) -> dict[str, object]:
     request_url = build_reader_url(url)
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.get(request_url)
@@ -52,7 +77,7 @@ async def read_with_jina(url: str, timeout: int = 60) -> dict[str, object]:
     }
 
 
-async def read_with_direct_httpx(url: str, timeout: int = 60) -> dict[str, object]:
+async def read_with_direct_httpx(url: str, timeout: int = 20) -> dict[str, object]:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -79,41 +104,46 @@ async def read_with_direct_httpx(url: str, timeout: int = 60) -> dict[str, objec
     }
 
 
-async def read_with_playwright(url: str, timeout: int = 60) -> dict[str, object]:
+async def read_with_playwright(url: str, timeout: int = 20) -> dict[str, object]:
     try:
         from playwright.async_api import async_playwright
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("playwright reader is not installed") from exc
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
-        try:
-            page = await browser.new_page(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0 Safari/537.36"
-                ),
-                locale="ru-RU",
+    async with browser_semaphore():
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--no-sandbox"],
             )
-            response = await page.goto(url, wait_until="networkidle", timeout=max(1, int(timeout)) * 1000)
-            html = await page.content()
-            text = extract_text(html, url)
-            if not text:
-                raise RuntimeError("playwright reader extracted empty text")
-            return {
-                "url": url,
-                "reader": "playwright",
-                "request_url": page.url,
-                "status_code": response.status if response else 0,
-                "content_type": response.headers.get("content-type", "") if response else "",
-                "text": text,
-            }
-        finally:
-            await browser.close()
+            try:
+                page = await browser.new_page(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0 Safari/537.36"
+                    ),
+                    locale="ru-RU",
+                )
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=max(1, int(timeout)) * 1000)
+                html = await page.content()
+                text = extract_text(html, url)
+                if not text:
+                    raise RuntimeError("playwright reader extracted empty text")
+                return {
+                    "url": url,
+                    "reader": "playwright",
+                    "request_url": page.url,
+                    "status_code": response.status if response else 0,
+                    "content_type": response.headers.get("content-type", "") if response else "",
+                    "text": text,
+                }
+            finally:
+                await browser.close()
 
 
-async def read_url(url: str, timeout: int = 60) -> dict[str, object]:
+async def read_url(url: str, timeout: int | None = None) -> dict[str, object]:
+    timeout = timeout or env_int("READER_TIMEOUT_SECONDS", 20, min_value=5, max_value=120)
     errors: list[str] = []
     try:
         return await read_with_jina(url=url, timeout=timeout)

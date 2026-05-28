@@ -9,6 +9,28 @@ import xml.etree.ElementTree as ET
 import httpx
 
 
+def env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 300) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
+def env_float(name: str, default: float, *, min_value: float = 0.1, max_value: float = 60.0) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
 def build_url(base_url: str, extra_params: dict[str, object]) -> str:
     parsed = urlparse(base_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -65,11 +87,15 @@ def extract_results(root: ET.Element, limit_docs: int, limit_passages: int) -> l
 
 async def fetch_with_retries(
     url: str,
-    retries: int = 8,
-    min_wait: float = 5.0,
-    max_wait: float = 10.0,
+    retries: int | None = None,
+    min_wait: float | None = None,
+    max_wait: float | None = None,
 ) -> ET.Element:
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+    retries = retries or env_int("XML_SEARCH_RETRIES", 3, min_value=1, max_value=8)
+    min_wait = min_wait or env_float("XML_SEARCH_MIN_WAIT_SECONDS", 2.0, min_value=0.2, max_value=30.0)
+    max_wait = max_wait or env_float("XML_SEARCH_MAX_WAIT_SECONDS", 4.0, min_value=min_wait, max_value=60.0)
+    timeout = env_int("XML_SEARCH_TIMEOUT_SECONDS", 15, min_value=5, max_value=120)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         for _attempt in range(1, retries + 1):
             response = await client.get(url)
             response.raise_for_status()

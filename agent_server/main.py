@@ -72,6 +72,17 @@ logger = logging.getLogger(__name__)
 FINALIZATION_TURN_BUFFER = 4
 
 
+def env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 300) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
 def configure_openai_client() -> AsyncOpenAI | None:
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("PROXY_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("PROXY_BASE_URL")
@@ -176,8 +187,8 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
     async def search_supplier_web(
         ctx: RunContextWrapper[ItemRunContext],
         query: str,
-        docs: int = 8,
-        maxpassages: int = 4,
+        docs: int = 5,
+        maxpassages: int = 3,
         lr: int | None = None,
     ):
         """Internet search for supplier pages. Pass keywords, not URLs. Returns title/url/passages."""
@@ -197,7 +208,7 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
             return [{"ok": False, "query": query, "error": str(exc)}]
 
     @function_tool
-    async def read_supplier_page(ctx: RunContextWrapper[ItemRunContext], url: str, timeout: int = 60):
+    async def read_supplier_page(ctx: RunContextWrapper[ItemRunContext], url: str, timeout: int = 20):
         """Read the contents of a supplier or catalog page via reader chain (Jina -> direct -> Playwright)."""
 
         log(ctx, event_type="read_start", message=f"Читаю: {url}", metadata={"url": url})
@@ -215,7 +226,7 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
             return {"ok": False, "url": url, "error": str(exc)}
 
     @function_tool(name_override="find_in_page")
-    async def find_in_page(ctx: RunContextWrapper[ItemRunContext], url: str, query: str = "", timeout: int = 60):
+    async def find_in_page(ctx: RunContextWrapper[ItemRunContext], url: str, query: str = "", timeout: int = 20):
         """Alias for read_supplier_page. Use it to inspect a supplier page and find relevant offer details."""
 
         result = await read_url(url=url, timeout=timeout)
@@ -486,11 +497,19 @@ async def parse_upload_with_llm(
 # Run manager
 # ---------------------------------------------------------------------------
 
+class WorkerLimits:
+    def __init__(self) -> None:
+        self.supplier_runs = asyncio.Semaphore(env_int("SUPPLIER_WORKERS", 1, min_value=1, max_value=8))
+        self.image_searches = asyncio.Semaphore(env_int("IMAGE_SEARCH_WORKERS", 1, min_value=1, max_value=8))
+        self.upload_parses = asyncio.Semaphore(env_int("UPLOAD_PARSE_WORKERS", 1, min_value=1, max_value=4))
+
+
 class RunManager:
-    def __init__(self, storage: JsonStorage, model_name: str, client: AsyncOpenAI | None):
+    def __init__(self, storage: JsonStorage, model_name: str, client: AsyncOpenAI | None, worker_limits: WorkerLimits):
         self.storage = storage
         self.model_name = model_name
         self.client = client
+        self.worker_limits = worker_limits
         self.agent_model: Any = model_name
         self.fallback_agent_model: Any | None = None
         if self.client is not None and llm_uses_openrouter():
@@ -536,6 +555,7 @@ class RunManager:
             project_id=project.id,
             item_id=item.id,
         )
+        self._running_items.add(item.id)
         asyncio.create_task(self._run_item(run_id=run.id, project_id=project.id, item_id=item.id, kind="item_discovery"))
         return run.id
 
@@ -543,6 +563,7 @@ class RunManager:
         if upload_id in self._upload_running:
             raise ValueError("upload is already being parsed")
         run = self.storage.create_run(kind="upload_parse", label=f"Парсинг загрузки {upload_id}")
+        self._upload_running.add(upload_id)
         asyncio.create_task(self._run_upload_parse(run_id=run.id, upload_id=upload_id))
         return run.id
 
@@ -582,6 +603,14 @@ class RunManager:
     async def _run_item(self, *, run_id: str, project_id: str, item_id: str, kind: str) -> None:
         self._running_items.add(item_id)
         try:
+            async with self.worker_limits.supplier_runs:
+                await self._run_item_unlimited(run_id=run_id, project_id=project_id, item_id=item_id, kind=kind)
+        finally:
+            self._running_items.discard(item_id)
+
+    async def _run_item_unlimited(self, *, run_id: str, project_id: str, item_id: str, kind: str) -> None:
+        self._running_items.add(item_id)
+        try:
             project = self.storage.get_project(project_id)
             item = next((candidate for candidate in project.items if candidate.id == item_id), None)
             if item is None:
@@ -596,6 +625,10 @@ class RunManager:
             )
             config = self.storage.load_config()
             iterations = config.monitor_iterations if kind == "item_monitor" else config.discovery_iterations
+            if kind == "item_monitor":
+                iterations = min(iterations, env_int("MAX_MONITOR_ITERATIONS", 3, min_value=1, max_value=30))
+            else:
+                iterations = min(iterations, env_int("MAX_DISCOVERY_ITERATIONS", 5, min_value=1, max_value=50))
             prompt_intro = (
                 "Найди альтернативных поставщиков для указанной позиции."
                 if kind == "item_discovery"
@@ -669,6 +702,14 @@ class RunManager:
             self._running_items.discard(item_id)
 
     async def _run_upload_parse(self, *, run_id: str, upload_id: str) -> None:
+        self._upload_running.add(upload_id)
+        try:
+            async with self.worker_limits.upload_parses:
+                await self._run_upload_parse_unlimited(run_id=run_id, upload_id=upload_id)
+        finally:
+            self._upload_running.discard(upload_id)
+
+    async def _run_upload_parse_unlimited(self, *, run_id: str, upload_id: str) -> None:
         self._upload_running.add(upload_id)
         try:
             upload = next((item for item in self.storage.list_uploads() if item.id == upload_id), None)
@@ -792,6 +833,16 @@ class RunManager:
             self._upload_running.discard(upload_id)
 
     async def _run_image_search(self, *, run_id: str, project_id: str, item_id: str, item_name: str, hint: str) -> None:
+        async with self.worker_limits.image_searches:
+            await self._run_image_search_unlimited(
+                run_id=run_id,
+                project_id=project_id,
+                item_id=item_id,
+                item_name=item_name,
+                hint=hint,
+            )
+
+    async def _run_image_search_unlimited(self, *, run_id: str, project_id: str, item_id: str, item_name: str, hint: str) -> None:
         try:
             self.storage.update_run(run_id, status="running")
             self.storage.append_run_event(
@@ -866,6 +917,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     base_storage = JsonStorage(base_data_dir)
     auth_store = AuthStore()
     model_name = configured_model_name()
+    worker_limits = WorkerLimits()
     runtimes: dict[str, tuple[JsonStorage, RunManager]] = {}
 
     def runtime_for_user(user: UserPublic) -> tuple[JsonStorage, RunManager]:
@@ -876,7 +928,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         user_storage = JsonStorage(user_dir)
         user_storage.enable_postgres_sync(dsn=auth_store.dsn, user_id=user.id)
         user_storage.public_images_prefix = f"/static/user-images/{user.id}/images"  # type: ignore[attr-defined]
-        user_run_manager = RunManager(storage=user_storage, model_name=model_name, client=client)
+        user_run_manager = RunManager(storage=user_storage, model_name=model_name, client=client, worker_limits=worker_limits)
         user_run_manager.start()
         runtimes[user.id] = (user_storage, user_run_manager)
         return user_storage, user_run_manager

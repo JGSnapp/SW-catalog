@@ -21,6 +21,28 @@ import httpx
 IMG_EXT_RE = re.compile(r"\.(jpg|jpeg|png|webp|gif|bmp|tiff)(\?.*)?$", re.IGNORECASE)
 
 
+def _env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 300) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
+def _env_float(name: str, default: float, *, min_value: float = 0.1, max_value: float = 60.0) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
 def _build_url(base_url: str, extra_params: dict[str, object]) -> str:
     parsed = urlparse(base_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -73,8 +95,8 @@ async def search_images(
     device: str | None = None,
     domain: str | None = None,
     base_url: str | None = None,
-    retries: int = 5,
-    wait_seconds: float = 2.5,
+    retries: int | None = None,
+    wait_seconds: float | None = None,
 ) -> list[str]:
     base = base_url or os.getenv("XMLSTOCK_YANDEXLIVE_URL")
     if not base:
@@ -91,7 +113,10 @@ async def search_images(
         },
     )
     last_error: str | None = None
-    async with httpx.AsyncClient(timeout=40) as client:
+    retries = retries or _env_int("IMAGE_SEARCH_RETRIES", 3, min_value=1, max_value=8)
+    wait_seconds = wait_seconds or _env_float("IMAGE_SEARCH_WAIT_SECONDS", 1.5, min_value=0.2, max_value=20.0)
+    timeout = _env_int("IMAGE_SEARCH_TIMEOUT_SECONDS", 15, min_value=5, max_value=120)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         for _attempt in range(max(1, retries)):
             response = await client.get(url)
             if response.status_code != 200:
@@ -115,8 +140,9 @@ async def search_images(
     raise RuntimeError(f"image search did not finish after retries; last error: {last_error}")
 
 
-async def download_image(url: str, destination: Path, *, timeout: int = 30) -> Path:
+async def download_image(url: str, destination: Path, *, timeout: int | None = None) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    timeout = timeout or _env_int("IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 15, min_value=5, max_value=120)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         response = await client.get(url, headers={"User-Agent": "SW-catalog/1.0"})
         response.raise_for_status()
