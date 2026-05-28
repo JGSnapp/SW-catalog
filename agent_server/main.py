@@ -83,6 +83,11 @@ def env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 300
     return max(min_value, min(max_value, parsed))
 
 
+def compact_text(value: object, limit: int = 180) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def configure_openai_client() -> AsyncOpenAI | None:
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("PROXY_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("PROXY_BASE_URL")
@@ -193,14 +198,29 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
     ):
         """Internet search for supplier pages. Pass keywords, not URLs. Returns title/url/passages."""
 
-        log(ctx, event_type="search_start", message=f"Поиск: {query}", metadata={"query": query})
+        docs = max(1, min(10, int(docs)))
+        maxpassages = max(1, min(5, int(maxpassages)))
+        log(
+            ctx,
+            event_type="search_start",
+            message=f"Поисковый запрос: {query}",
+            metadata={"query": query, "docs": str(docs), "maxpassages": str(maxpassages), "lr": str(lr or "")},
+        )
         try:
             result = await search_web(query=query, docs=docs, maxpassages=maxpassages, lr=lr)
+            preview = "; ".join(
+                f"{index + 1}. {compact_text(item.get('title', ''), 80)} — {item.get('url', '')}"
+                for index, item in enumerate(result[:5])
+            )
             log(
                 ctx,
                 event_type="search_done",
-                message=f"Найдено результатов: {len(result)}",
-                metadata={"query": query, "results": str(len(result))},
+                message=f"Найдено результатов: {len(result)}. {preview or 'Подходящих URL нет.'}",
+                metadata={
+                    "query": query,
+                    "results": str(len(result)),
+                    "urls": "\n".join(str(item.get("url", "")) for item in result[:8]),
+                },
             )
             return result
         except Exception as exc:
@@ -211,14 +231,33 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
     async def read_supplier_page(ctx: RunContextWrapper[ItemRunContext], url: str, timeout: int = 20):
         """Read the contents of a supplier or catalog page via reader chain (Jina -> direct -> Playwright)."""
 
-        log(ctx, event_type="read_start", message=f"Читаю: {url}", metadata={"url": url})
+        log(ctx, event_type="read_start", message=f"Читаю страницу поставщика: {url}", metadata={"url": url, "timeout": str(timeout)})
         try:
             result = await read_url(url=url, timeout=timeout)
+            text = str(result.get("text") or "")
+            fallback_errors = result.get("fallback_errors") or []
+            if fallback_errors:
+                log(
+                    ctx,
+                    event_type="reader_fallback",
+                    message=f"Основные способы чтения не сработали: {'; '.join(str(item) for item in fallback_errors)}",
+                    metadata={"url": url, "errors": "\n".join(str(item) for item in fallback_errors)},
+                )
             log(
                 ctx,
                 event_type="read_done",
-                message=f"Страница прочитана: {url}",
-                metadata={"url": url, "reader": str(result.get("reader", ""))},
+                message=(
+                    f"Страница прочитана через {result.get('reader', 'unknown')}: "
+                    f"{url} ({len(text)} символов, HTTP {result.get('status_code', 0)})"
+                ),
+                metadata={
+                    "url": url,
+                    "reader": str(result.get("reader", "")),
+                    "request_url": str(result.get("request_url", "")),
+                    "status_code": str(result.get("status_code", "")),
+                    "content_type": str(result.get("content_type", "")),
+                    "text_length": str(len(text)),
+                },
             )
             return result
         except Exception as exc:
@@ -229,12 +268,25 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
     async def find_in_page(ctx: RunContextWrapper[ItemRunContext], url: str, query: str = "", timeout: int = 20):
         """Alias for read_supplier_page. Use it to inspect a supplier page and find relevant offer details."""
 
+        log(ctx, event_type="find_in_page_start", message=f"Ищу на странице: {url}", metadata={"url": url, "query": query, "timeout": str(timeout)})
         result = await read_url(url=url, timeout=timeout)
+        text = str(result.get("text") or "")
         log(
             ctx,
             event_type="read_done",
-            message=f"Страница прочитана: {url}",
-            metadata={"url": url, "query": query, "reader": str(result.get("reader", ""))},
+            message=(
+                f"Страница прочитана через {result.get('reader', 'unknown')}: "
+                f"{url} ({len(text)} символов, HTTP {result.get('status_code', 0)})"
+            ),
+            metadata={
+                "url": url,
+                "query": query,
+                "reader": str(result.get("reader", "")),
+                "request_url": str(result.get("request_url", "")),
+                "status_code": str(result.get("status_code", "")),
+                "content_type": str(result.get("content_type", "")),
+                "text_length": str(len(text)),
+            },
         )
         return result
 
@@ -282,8 +334,16 @@ def build_item_agent(model: Any) -> Agent[ItemRunContext]:
         log(
             ctx,
             event_type="supplier_upsert",
-            message=f"Сохранён поставщик: {supplier.name}",
-            metadata={"supplier_id": supplier.id, "url": supplier.url},
+            message=f"Сохранён поставщик: {supplier.name} — {supplier.offer_title or 'без названия оффера'}",
+            metadata={
+                "supplier_id": supplier.id,
+                "name": supplier.name,
+                "offer_title": supplier.offer_title,
+                "price_text": supplier.price_text,
+                "lead_time": supplier.lead_time,
+                "url": supplier.url,
+                "source_url": supplier.source_url,
+            },
         )
         return {"supplier_id": supplier.id, "updated_at": supplier.updated_at}
 
@@ -603,7 +663,22 @@ class RunManager:
     async def _run_item(self, *, run_id: str, project_id: str, item_id: str, kind: str) -> None:
         self._running_items.add(item_id)
         try:
+            self.storage.append_run_event(
+                run_id=run_id,
+                project_id=project_id,
+                item_id=item_id,
+                event_type="worker_queued",
+                message="Задача поставлена в очередь на поиск поставщиков.",
+                metadata={"worker_limit": str(env_int("SUPPLIER_WORKERS", 1, min_value=1, max_value=8))},
+            )
             async with self.worker_limits.supplier_runs:
+                self.storage.append_run_event(
+                    run_id=run_id,
+                    project_id=project_id,
+                    item_id=item_id,
+                    event_type="worker_acquired",
+                    message="Выделен worker для поиска поставщиков.",
+                )
                 await self._run_item_unlimited(run_id=run_id, project_id=project_id, item_id=item_id, kind=kind)
         finally:
             self._running_items.discard(item_id)
@@ -629,6 +704,22 @@ class RunManager:
                 iterations = min(iterations, env_int("MAX_MONITOR_ITERATIONS", 3, min_value=1, max_value=30))
             else:
                 iterations = min(iterations, env_int("MAX_DISCOVERY_ITERATIONS", 5, min_value=1, max_value=50))
+            max_turns = compute_max_turns(iterations)
+            self.storage.append_run_event(
+                run_id=run_id,
+                project_id=project_id,
+                item_id=item_id,
+                event_type="agent_config",
+                message=f"Агент настроен: до {iterations} исследовательских ходов, максимум {max_turns} turn.",
+                metadata={
+                    "model": configured_model_name(),
+                    "fallback_model": configured_fallback_model_name(),
+                    "iterations": str(iterations),
+                    "max_turns": str(max_turns),
+                    "reader_timeout": str(env_int("READER_TIMEOUT_SECONDS", 20, min_value=5, max_value=120)),
+                    "playwright_workers": str(env_int("PLAYWRIGHT_BROWSER_WORKERS", 1, min_value=1, max_value=4)),
+                },
+            )
             prompt_intro = (
                 "Найди альтернативных поставщиков для указанной позиции."
                 if kind == "item_discovery"
@@ -652,7 +743,7 @@ class RunManager:
                     build_item_agent(self.agent_model),
                     prompt,
                     context=context,
-                    max_turns=compute_max_turns(iterations),
+                    max_turns=max_turns,
                 )
             except Exception as exc:
                 if self.fallback_agent_model is None:
@@ -670,7 +761,7 @@ class RunManager:
                     build_item_agent(self.fallback_agent_model),
                     prompt,
                     context=context,
-                    max_turns=compute_max_turns(iterations),
+                    max_turns=max_turns,
                 )
             summary = str(result.final_output).strip()
             self.storage.update_run(run_id, status="completed", summary=summary, finished_at=utc_now_iso())

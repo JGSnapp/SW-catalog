@@ -99,6 +99,17 @@ type RunRecord = {
   error: string | null;
 };
 
+type RunEventRecord = {
+  id: string;
+  run_id: string;
+  project_id: string | null;
+  item_id: string | null;
+  event_type: string;
+  message: string;
+  created_at: string;
+  metadata: Record<string, string>;
+};
+
 type UploadRecord = {
   id: string;
   name: string;
@@ -1003,6 +1014,21 @@ function ProjectDetailView(props: {
 
   const projectSuppliers = state.suppliers.filter((s) => s.project_id === project.id);
   const itemSuppliers = selectedItem ? projectSuppliers.filter((s) => s.item_id === selectedItem.id) : [];
+  const activeSupplierRuns = useMemo(() => {
+    const byItem = new Map<string, RunRecord>();
+    state.runs
+      .filter(
+        (run) =>
+          run.project_id === project.id &&
+          run.item_id &&
+          (run.kind === 'item_discovery' || run.kind === 'item_monitor') &&
+          (run.status === 'queued' || run.status === 'running')
+      )
+      .forEach((run) => {
+        if (run.item_id && !byItem.has(run.item_id)) byItem.set(run.item_id, run);
+      });
+    return byItem;
+  }, [project.id, state.runs]);
 
   const itemSavingsForProject = useMemo(() => {
     let best = 0;
@@ -1050,6 +1076,7 @@ function ProjectDetailView(props: {
           project={project}
           suppliers={projectSuppliers}
           selectedItemId={selectedItem?.id || null}
+          activeRuns={activeSupplierRuns}
           onSelect={(id) => onSelectItem(id)}
           onError={onError}
           onNotice={onNotice}
@@ -1059,6 +1086,7 @@ function ProjectDetailView(props: {
           project={project}
           item={selectedItem}
           itemSuppliers={itemSuppliers}
+          activeRun={selectedItem ? activeSupplierRuns.get(selectedItem.id) || null : null}
           onError={onError}
           onNotice={onNotice}
           onReload={onReload}
@@ -1101,12 +1129,13 @@ function ItemsColumn(props: {
   project: ProjectRecord;
   suppliers: SupplierRecord[];
   selectedItemId: string | null;
+  activeRuns: Map<string, RunRecord>;
   onSelect: (id: string) => void;
   onError: (v: string | null) => void;
   onNotice: (v: string | null) => void;
   onReload: () => Promise<void>;
 }) {
-  const { project, suppliers, selectedItemId, onSelect, onError, onNotice, onReload } = props;
+  const { project, suppliers, selectedItemId, activeRuns, onSelect, onError, onNotice, onReload } = props;
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ name: '', specification: '', quantity: 1, unit: 'шт', target_price: '' });
 
@@ -1147,6 +1176,7 @@ function ItemsColumn(props: {
       <div className="item-list">
         {project.items.map((item) => {
           const itemSuppliers = suppliers.filter((s) => s.item_id === item.id);
+          const activeRun = activeRuns.get(item.id);
           const minPrice = itemSuppliers
             .map((s) => s.price)
             .filter((p): p is number => p != null)
@@ -1167,6 +1197,7 @@ function ItemsColumn(props: {
                 <div className="item-meta">
                   <span>{itemSuppliers.length} поставщ.</span>
                   <span>{item.quantity} {item.unit}</span>
+                  {activeRun ? <span className="item-live-dot">Поиск идет</span> : null}
                 </div>
               </div>
               <div className="item-price">
@@ -1185,11 +1216,12 @@ function ItemDetailColumn(props: {
   project: ProjectRecord;
   item: ProjectItem | null;
   itemSuppliers: SupplierRecord[];
+  activeRun: RunRecord | null;
   onError: (v: string | null) => void;
   onNotice: (v: string | null) => void;
   onReload: () => Promise<void>;
 }) {
-  const { project, item, itemSuppliers, onError, onNotice, onReload } = props;
+  const { project, item, itemSuppliers, activeRun, onError, onNotice, onReload } = props;
   const [busy, setBusy] = useState(false);
 
   if (!item) {
@@ -1233,6 +1265,7 @@ function ItemDetailColumn(props: {
     .map((s) => s.price)
     .filter((p): p is number => p != null)
     .reduce((acc, value) => Math.max(acc, value), 0);
+  const searchInProgress = busy || Boolean(activeRun);
 
   return (
     <div className="column">
@@ -1240,6 +1273,15 @@ function ItemDetailColumn(props: {
         <h3>{item.name}</h3>
         <button className="ghost-button small" onClick={remove}>Удалить</button>
       </div>
+      {activeRun ? (
+        <div className="search-progress-banner">
+          <div className="search-spinner" aria-hidden="true" />
+          <div>
+            <strong>Идет поиск поставщиков</strong>
+            <p>{activeRun.status === 'queued' ? 'Задача ожидает свободный worker.' : 'Агент проверяет поисковые выдачи и страницы поставщиков.'}</p>
+          </div>
+        </div>
+      ) : null}
       {item.image_url ? <img className="item-hero-image" src={item.image_url} alt={item.name} /> : null}
       <dl className="detail-list">
         <div><dt>Спецификация</dt><dd>{item.specification || '—'}</dd></div>
@@ -1249,8 +1291,8 @@ function ItemDetailColumn(props: {
         <div><dt>Диапазон цен</dt><dd>{Number.isFinite(minPrice) ? `${formatMoney(minPrice as number, project.currency)} … ${formatMoney(maxPrice, project.currency)}` : '—'}</dd></div>
       </dl>
       <div className="item-detail-actions">
-        <button className="primary-button" onClick={runDiscovery} disabled={busy}>
-          {busy ? 'Запускаю...' : 'Найти поставщиков'}
+        <button className="primary-button" onClick={runDiscovery} disabled={searchInProgress}>
+          {searchInProgress ? 'Поиск выполняется...' : 'Найти поставщиков'}
         </button>
       </div>
       {item.ai_notes ? (
@@ -1487,6 +1529,26 @@ function SuppliersView(props: { state: AppState; onError: (v: string | null) => 
 // ---------- Reports ----------
 
 function ReportsView({ state }: { state: AppState }) {
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const [eventsByRun, setEventsByRun] = useState<Record<string, RunEventRecord[]>>({});
+  const [loadingEvents, setLoadingEvents] = useState<string | null>(null);
+
+  const toggleRunEvents = async (runId: string) => {
+    if (openRunId === runId) {
+      setOpenRunId(null);
+      return;
+    }
+    setOpenRunId(runId);
+    if (eventsByRun[runId]) return;
+    setLoadingEvents(runId);
+    try {
+      const events = await request<RunEventRecord[]>(`/runs/${runId}/events`);
+      setEventsByRun((current) => ({ ...current, [runId]: events }));
+    } finally {
+      setLoadingEvents(null);
+    }
+  };
+
   return (
     <div className="page">
       <section className="panel">
@@ -1506,7 +1568,13 @@ function ReportsView({ state }: { state: AppState }) {
               <div className="run-meta">
                 <span className={`status-pill status-${run.status}`}>{run.status}</span>
                 <span>{formatDate(run.started_at)}</span>
+                <button className="link-button small" onClick={() => toggleRunEvents(run.id)}>
+                  {openRunId === run.id ? 'Скрыть лог' : 'Лог'}
+                </button>
               </div>
+              {openRunId === run.id ? (
+                <RunEventsPanel events={eventsByRun[run.id] || []} loading={loadingEvents === run.id} />
+              ) : null}
             </div>
           ))}
           {!state.runs.length ? <div className="empty-state"><p>Запусков пока нет.</p></div> : null}
@@ -1536,6 +1604,40 @@ function ReportsView({ state }: { state: AppState }) {
           {!state.uploads.length ? <div className="empty-state"><p>Загрузок пока нет.</p></div> : null}
         </div>
       </section>
+    </div>
+  );
+}
+
+function RunEventsPanel({ events, loading }: { events: RunEventRecord[]; loading: boolean }) {
+  if (loading) {
+    return <div className="run-events"><p>Загружаю лог...</p></div>;
+  }
+  if (!events.length) {
+    return <div className="run-events"><p>Событий пока нет.</p></div>;
+  }
+  return (
+    <div className="run-events">
+      {events.map((event) => (
+        <div key={event.id} className="run-event">
+          <div className="run-event-head">
+            <span>{formatDate(event.created_at)}</span>
+            <strong>{event.event_type}</strong>
+          </div>
+          <p>{event.message}</p>
+          {Object.keys(event.metadata || {}).length ? (
+            <dl>
+              {Object.entries(event.metadata).map(([key, value]) => (
+                value ? (
+                  <div key={key}>
+                    <dt>{key}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ) : null
+              ))}
+            </dl>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }

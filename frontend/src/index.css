@@ -756,6 +756,37 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .dot-existing { background: var(--bg-deep); color: var(--muted); }
 .dot-discovered { background: var(--warm-soft); color: var(--warm); }
 
+.item-live-dot {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 800;
+}
+
+.search-progress-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.search-progress-banner strong { display: block; }
+.search-progress-banner p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
+.search-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid rgba(70, 121, 105, 0.2);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ---------- Toggle ---------- */
 
 .toggle { position: relative; display: inline-block; width: 38px; height: 22px; cursor: pointer; }
@@ -843,6 +874,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .run-list { display: grid; gap: 12px; }
 .run-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: start;
   justify-content: space-between;
@@ -853,6 +885,33 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .run-row p { margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
 .run-meta { display: flex; flex-direction: column; align-items: end; gap: 6px; color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.run-events {
+  flex-basis: 100%;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.run-event {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.run-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.run-event p { margin: 0; color: var(--ink); }
+.run-event dl { display: grid; gap: 4px; margin: 4px 0 0; font-size: 0.78rem; }
+.run-event dl div { display: grid; grid-template-columns: 120px 1fr; gap: 8px; }
+.run-event dt { color: var(--muted); }
+.run-event dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- Settings site list ---------- */
 
